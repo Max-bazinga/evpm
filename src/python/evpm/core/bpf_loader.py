@@ -37,8 +37,36 @@ class BPFLoader:
                 print(f"  Found BPF kernels at: {self.kernel_src_dir}")
                 break
         
+        # 如果没有 vmlinux.h，创建空文件或生成
+        vmlinux_h = os.path.join(self.kernel_src_dir, 'vmlinux.h')
+        if not os.path.exists(vmlinux_h):
+            print(f"  Generating vmlinux.h...")
+            self._generate_vmlinux_h(vmlinux_h)
+        
         if not self.kernel_src_dir:
             raise RuntimeError(f"BPF kernel directory not found. Searched: {possible_paths}")
+    
+    def _generate_vmlinux_h(self, output_path: str):
+        """Generate vmlinux.h from system BTF"""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['bpftool', 'btf', 'dump', 'file', '/sys/kernel/btf/vmlinux', 
+                 'format', 'c'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            with open(output_path, 'w') as f:
+                f.write(result.stdout)
+            print(f"    ✓ Generated vmlinux.h")
+        except Exception as e:
+            print(f"    ⚠ Could not generate vmlinux.h: {e}")
+            # Create minimal placeholder
+            with open(output_path, 'w') as f:
+                f.write('/* Minimal vmlinux.h placeholder */\n')
+                f.write('/* Install bpftool and run: bpftool btf dump file /sys/kernel/btf/vmlinux format c > vmlinux.h */\n')
+            print(f"    ⚠ Created placeholder vmlinux.h")
         
     def load_program(self, name: str, src_file: str) -> BPF:
         """Load a BPF program from source file"""
