@@ -43,8 +43,75 @@ sudo apt-get install -y \
     linux-headers-$(uname -r) \
     python3-pip python3-dev
 
-# 安装 BCC
+### 安装 BCC（重要）
+
+BCC 是 eVPM 的核心依赖，**必须通过系统包管理器安装**，不能通过 pip 安装。
+
+#### Ubuntu/Debian (20.04+)
+
+```bash
+# 添加 BCC 官方仓库
+sudo apt-get update
 sudo apt-get install -y bpfcc-tools libbpfcc-dev
+
+# 验证安装
+python3 -c "import bcc; print(bcc.__version__)"
+```
+
+#### Ubuntu/Debian (18.04)
+
+```bash
+# 安装依赖
+sudo apt-get install -y bison build-essential cmake flex git libedit-dev \
+  libllvm6.0 llvm-6.0-dev libclang-6.0-dev python zlib1g-dev libelf-dev
+
+# 克隆 BCC 源码
+git clone https://github.com/iovisor/bcc.git
+mkdir bcc/build; cd bcc/build
+cmake ..
+make
+sudo make install
+cmake -DPYTHON_CMD=python3 .. 
+cd src/python/
+sudo make install
+```
+
+#### macOS
+
+```bash
+# 使用 Homebrew 安装
+brew install bcc
+
+# 注意：macOS 不支持 eBPF，仅用于开发
+# 生产环境必须在 Linux 上运行
+```
+
+#### 从源码编译（推荐用于最新内核）
+
+```bash
+# 安装依赖
+sudo apt-get install -y git build-essential cmake libllvm-dev \
+  llvm-dev libclang-dev libelf-dev python3-dev
+
+# 克隆并编译
+git clone https://github.com/iovisor/bcc.git
+cd bcc
+git checkout v0.29.0  # 使用稳定版本
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+#### 验证 BCC 安装
+
+```bash
+# 检查 BCC 版本
+python3 -c "import bcc; print(f'BCC version: {bcc.__version__}')"
+
+# 测试内核支持
+sudo python3 -c "from bcc import BPF; print('BCC works!')"
+```
 ```
 
 ### 安装 eVPM
