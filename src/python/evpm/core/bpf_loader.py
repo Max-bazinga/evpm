@@ -16,10 +16,29 @@ class BPFLoader:
     
     def __init__(self):
         self.programs: Dict[str, BPF] = {}
-        self.kernel_src_dir = os.path.join(
-            os.path.dirname(__file__), 
-            '..', '..', '..', 'src', 'kernels'
-        )
+        # 尝试多种方式找到内核源码目录
+        possible_paths = [
+            # 开发模式 (从 git clone 运行)
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', 'src', 'kernels'),
+            # 安装后模式
+            os.path.join(os.path.dirname(__file__), '..', '..', 'kernels'),
+            # 当前目录模式
+            os.path.join(os.getcwd(), 'src', 'kernels'),
+            # 绝对路径
+            '/home/zh/evpm/src/kernels',
+            '/usr/local/share/evpm/kernels',
+            '/opt/evpm/kernels',
+        ]
+        
+        self.kernel_src_dir = None
+        for path in possible_paths:
+            if os.path.exists(path) and os.path.isdir(path):
+                self.kernel_src_dir = os.path.abspath(path)
+                print(f"  Found BPF kernels at: {self.kernel_src_dir}")
+                break
+        
+        if not self.kernel_src_dir:
+            raise RuntimeError(f"BPF kernel directory not found. Searched: {possible_paths}")
         
     def load_program(self, name: str, src_file: str) -> BPF:
         """Load a BPF program from source file"""
