@@ -4,10 +4,8 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-#include <bpf/bpf_core_read.h>
+#include <bcc/bcc_lib.h>
+#include <bcc/bcc_lib.h>
 
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256

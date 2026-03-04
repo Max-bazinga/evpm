@@ -4,10 +4,8 @@
  * Monitors scheduling latency for vCPU threads
  */
 
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
-#include <bpf/bpf_core_read.h>
+#include <bcc/bcc_lib.h>
+#include <bcc/bcc_lib.h>
 
 #define TASK_COMM_LEN 16
 #define MAX_PIDS 1024
