@@ -47,32 +47,32 @@ struct vq_state {
 };
 
 /* Maps */
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 512 * 1024);
-} io_events SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_RINGBUF);
+     .max_entries = 512 * 1024);
+}; io_events SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_VQS);
-    __type(key, u32); /* vq unique ID */
-    __type(value, struct vq_state);
-} vq_states SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_HASH);
+     .max_entries = MAX_VQS);
+     .key_size = sizeof(u32); /* vq unique ID */
+     .value_size = sizeof(struct vq_state);
+}; vq_states SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 32);
-    __type(key, u32); /* device ID */
-    __type(value, struct io_stat);
-} io_stats SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_HASH);
+     .max_entries = 32);
+     .key_size = sizeof(u32); /* device ID */
+     .value_size = sizeof(struct io_stat);
+}; io_stats SEC(".maps");
 
 /* Counter for generating unique vq IDs */
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, u32);
-    __type(value, u32);
-} vq_id_counter SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_ARRAY);
+     .max_entries = 1);
+     .key_size = sizeof(u32);
+     .value_size = sizeof(u32);
+}; vq_id_counter SEC(".maps");
 
 /* Tracepoint: kvm_io - Port I/O */
 SEC("tp/kvm/kvm_io")

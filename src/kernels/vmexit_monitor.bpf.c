@@ -4,7 +4,6 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
-
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256
 
@@ -34,33 +33,32 @@ struct vmexit_stat {
     u64 min_duration_ns;
 };
 
-/* Maps */
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 512 * 1024);
-} vmexit_events SEC(".maps");
+/* Maps - BCC style */
+struct bpf_map_def SEC("maps") vmexit_events = {
+    .type = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 512 * 1024,
+};
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_VCPUS);
-    __type(key, u32);
-    __type(value, struct vmexit_state);
-} vmexit_states SEC(".maps");
+struct bpf_map_def SEC("maps") vmexit_states = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(struct vmexit_state),
+    .max_entries = MAX_VCPUS,
+};
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_EXIT_REASONS);
-    __type(key, u32);
-    __type(value, struct vmexit_stat);
-} vmexit_stats SEC(".maps");
+struct bpf_map_def SEC("maps") vmexit_stats = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(struct vmexit_stat),
+    .max_entries = MAX_EXIT_REASONS,
+};
 
-/* Histogram for exit duration */
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 20);
-    __type(key, u32);
-    __type(value, u64);
-} duration_hist SEC(".maps");
+struct bpf_map_def SEC("maps") duration_hist = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(u64),
+    .max_entries = 20,
+};
 
 /* Pre-defined duration buckets (in microseconds) */
 static const u64 DURATION_BUCKETS[] = {
@@ -166,23 +164,6 @@ int trace_kvm_entry(struct trace_event_raw_kvm_entry *ctx)
     
     /* Clear state */
     state->exit_ts = 0;
-    
-    return 0;
-}
-
-/* Kprobe: handle_exit (for additional exit handling analysis) */
-SEC("kprobe/kvm_x86_ops->handle_exit")
-int BPF_KPROBE(trace_handle_exit, struct kvm_vcpu *vcpu)
-{
-    u32 vcpu_id = BPF_CORE_READ(vcpu, vcpu_id);
-    u64 now = bpf_ktime_get_ns();
-    
-    /* Just for tracking exit handling start time */
-    struct vmexit_state *state = bpf_map_lookup_elem(
-        &vmexit_states, &vcpu_id);
-    if (state) {
-        state->guest_rip = now;
-    }
     
     return 0;
 }

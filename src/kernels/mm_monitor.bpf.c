@@ -38,17 +38,17 @@ struct mm_stat {
 };
 
 /* Maps */
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 512 * 1024);
-} mm_events SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_RINGBUF);
+     .max_entries = 512 * 1024);
+}; mm_events SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_VCPUS);
-    __type(key, u32);
-    __type(value, struct mm_stat);
-} mm_stats SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_HASH);
+     .max_entries = MAX_VCPUS);
+     .key_size = sizeof(u32);
+     .value_size = sizeof(struct mm_stat);
+}; mm_stats SEC(".maps");
 
 /* Page fault handling state */
 struct pf_state {
@@ -58,12 +58,12 @@ struct pf_state {
     u32 error_code;
 };
 
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_VCPUS);
-    __type(key, u32);
-    __type(value, struct pf_state);
-} pf_states SEC(".maps");
+struct bpf_map_def SEC("maps") 
+     .type = BPF_MAP_TYPE_HASH);
+     .max_entries = MAX_VCPUS);
+     .key_size = sizeof(u32);
+     .value_size = sizeof(struct pf_state);
+}; pf_states SEC(".maps");
 
 /* Error code flags */
 #define PFERR_PRESENT_BIT 0
@@ -96,7 +96,7 @@ int trace_kvm_page_fault(struct trace_event_raw_kvm_page_fault *ctx)
         struct mm_stat new_stat = {};
         new_stat.page_fault_count = 1;
         bpf_map_update_elem(&mm_stats, &vcpu_id, &new_stat, BPF_ANY);
-    } else {
+    }; else {
         stat->page_fault_count++;
     }
     
