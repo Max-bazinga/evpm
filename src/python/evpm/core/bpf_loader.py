@@ -37,14 +37,14 @@ class BPFLoader:
                 print(f"  Found BPF kernels at: {self.kernel_src_dir}")
                 break
         
-        # 如果没有 vmlinux.h，创建空文件或生成
+        if not self.kernel_src_dir:
+            raise RuntimeError(f"BPF kernel directory not found. Searched: {possible_paths}")
+        
+        # 如果没有 vmlinux.h，生成
         vmlinux_h = os.path.join(self.kernel_src_dir, 'vmlinux.h')
         if not os.path.exists(vmlinux_h):
             print(f"  Generating vmlinux.h...")
             self._generate_vmlinux_h(vmlinux_h)
-        
-        if not self.kernel_src_dir:
-            raise RuntimeError(f"BPF kernel directory not found. Searched: {possible_paths}")
     
     def _generate_vmlinux_h(self, output_path: str):
         """Generate vmlinux.h from system BTF"""
