@@ -78,9 +78,13 @@ class BPFLoader:
         with open(src_path, 'r') as f:
             src = f.read()
         
-        # Compile and load BPF program
+        # Compile and load BPF program with include paths
         try:
-            bpf = BPF(text=src)
+            # 添加系统 BPF 头文件路径
+            bpf = BPF(text=src, 
+                     cflags=['-I/usr/include',
+                            f'-I{self.kernel_src_dir}',
+                            '-I/usr/include/bpf'])
             self.programs[name] = bpf
             
             # Auto-attach tracepoints and kprobes
