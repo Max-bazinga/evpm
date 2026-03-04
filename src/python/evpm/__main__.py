@@ -72,8 +72,8 @@ def run_monitor(args):
     try:
         # Load eBPF programs
         print("📦 Loading eBPF programs...")
-        loader.load_program('vcpu_sched', 'src/kernels/vcpu_sched_monitor.bpf.c')
-        loader.load_program('vmexit', 'src/kernels/vmexit_monitor.bpf.c')
+        loader.load_program('vcpu_sched', 'vcpu_sched_monitor.bpf.c')
+        loader.load_program('vmexit', 'vmexit_monitor.bpf.c')
         
         # Start collection
         print("📊 Starting event collection...")
