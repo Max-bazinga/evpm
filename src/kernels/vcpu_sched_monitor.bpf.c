@@ -4,7 +4,7 @@
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
  */
 
-#include <uapi/linux/bpf.h>
+#include <linux/bpf.h>
 
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
@@ -43,8 +43,8 @@ BPF_TABLE("hash", u32, struct vcpu_state, vcpu_states, MAX_VCPUS);
 BPF_TABLE("hash", u32, u64, sched_latencies, 1);
 
 /* Tracepoint: kvm_vcpu_run_begin */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
-    u32 vcpu_id = args->vcpu_id;
+// args: vcpu_id
+int tracepoint__kvm__kvm_vcpu_run_begin(struct pt_regs *ctx, unsigned int vcpu_id) {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -78,8 +78,8 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
 }
 
 /* Tracepoint: kvm_vcpu_run_end */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_end) {
-    u32 vcpu_id = args->vcpu_id;
+// args: vcpu_id
+int tracepoint__kvm__kvm_vcpu_run_end(struct pt_regs *ctx, unsigned int vcpu_id) {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -106,8 +106,8 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_end) {
 }
 
 /* Tracepoint: kvm_vcpu_halt */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_halt) {
-    u32 vcpu_id = args->vcpu_id;
+// args: vcpu_id
+int tracepoint__kvm__kvm_vcpu_halt(struct pt_regs *ctx, unsigned int vcpu_id) {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -132,8 +132,8 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_halt) {
 }
 
 /* Tracepoint: kvm_vcpu_wakeup */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_wakeup) {
-    u32 vcpu_id = args->vcpu_id;
+// args: vcpu_id
+int tracepoint__kvm__kvm_vcpu_wakeup(struct pt_regs *ctx, unsigned int vcpu_id) {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -159,3 +159,4 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_wakeup) {
 }
 
 char LICENSE[] = "GPL";
+
