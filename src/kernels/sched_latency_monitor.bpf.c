@@ -4,8 +4,6 @@
  * Monitors scheduling latency for vCPU threads
  */
 
-#include <bcc/bcc_lib.h>
-#include <bcc/bcc_lib.h>
 
 #define TASK_COMM_LEN 16
 #define MAX_PIDS 1024

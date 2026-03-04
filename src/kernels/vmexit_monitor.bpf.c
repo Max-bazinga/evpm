@@ -4,8 +4,6 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
-#include <bcc/bcc_lib.h>
-#include <bcc/bcc_lib.h>
 
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256

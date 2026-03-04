@@ -2,9 +2,9 @@
  * eBPF VM Performance Monitor - vCPU Scheduling Monitor
  * 
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
+ * 
+ * Note: BCC provides all helper functions automatically, no includes needed
  */
-
-#include <bcc/bcc_lib.h>
 
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256

@@ -4,8 +4,6 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
-#include <bcc/bcc_lib.h>
-#include <bcc/bcc_lib.h>
 
 #define MAX_VCPUS 256
 #define MAX_VQS 256

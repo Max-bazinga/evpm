@@ -4,8 +4,6 @@
  * Monitors EPT/NPT page faults, TLB misses, and memory access patterns
  */
 
-#include <bcc/bcc_lib.h>
-#include <bcc/bcc_lib.h>
 
 #define MAX_VCPUS 256
 #define MAX_FAULT_REASONS 16
