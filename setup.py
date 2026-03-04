@@ -30,7 +30,10 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[
-        "bcc>=0.18.0",
+        # Note: bcc must be installed via system package manager
+        # Ubuntu/Debian: sudo apt install bpfcc-tools libbpfcc-dev
+        # macOS: brew install bcc
+        # See: https://github.com/iovisor/bcc/blob/master/INSTALL.md
         "rich>=10.0.0",
         "prometheus-client>=0.11.0",
         "flask>=2.0.0",
