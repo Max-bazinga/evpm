@@ -1,7 +1,11 @@
 # eVPM Python Dependencies
+# 
+# NOTE: bcc must be installed via system package manager:
+#   Ubuntu/Debian: sudo apt install bpfcc-tools libbpfcc-dev
+#   Or build from source: https://github.com/iovisor/bcc/blob/master/INSTALL.md
 
 # Core dependencies
-bcc>=0.18.0
+# bcc>=0.18.0  # Install via apt, not pip
 prometheus-client>=0.11.0
 
 # CLI dependencies
