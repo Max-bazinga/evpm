@@ -17,9 +17,13 @@ BPFTOOL := bpftool
 PYTHON := python3
 PIP := pip3
 
-# Flags
-BPF_CFLAGS := -target bpf -D__TARGET_ARCH_x86_64 -I/usr/include/x86_64-linux-gnu
-BPF_CFLAGS += -I$(KERNEL_DIR) -O2 -g
+# Flags - CO-RE compatible
+BPF_CFLAGS := -target bpf
+BPF_CFLAGS += -D__TARGET_ARCH_x86_64
+BPF_CFLAGS += -I$(KERNEL_DIR)
+BPF_CFLAGS += -O2 -g
+# CO-RE: Preserve access index for field offsets
+BPF_CFLAGS += -Xclang -O0 -Xclang -disable-llvm-passes
 
 # eBPF Programs
 BPF_SOURCES := $(wildcard $(KERNEL_DIR)/*.bpf.c)
