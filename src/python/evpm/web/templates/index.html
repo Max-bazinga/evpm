@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eVPM - eBPF VM Performance Monitor</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            min-height: 100vh;
+        }
+        .header {
+            background: #161b22;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #30363d;
+        }
+        .header h1 {
+            font-size: 1.5rem;
+            color: #58a6ff;
+        }
+        .header p {
+            color: #8b949e;
+            font-size: 0.875rem;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+        .card {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+        .card h2 {
+            font-size: 1rem;
+            color: #58a6ff;
+            margin-bottom: 1rem;
+        }
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #21262d;
+        }
+        .metric:last-child {
+            border-bottom: none;
+        }
+        .metric-label {
+            color: #8b949e;
+        }
+        .metric-value {
+            font-weight: 600;
+            color: #3fb950;
+        }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+        }
+        .status.running {
+            background: rgba(47, 129, 47, 0.2);
+            color: #3fb950;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3fb950;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🦊 eVPM - eBPF VM Performance Monitor</h1>
+        <p>Real-time KVM virtualization monitoring using eBPF</p>
+    </div>
+    
+    <div class="container">
+        <div class="status running">
+            <span class="status-dot"></span>
+            <span>Running</span>
+        </div>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>📊 vCPU Statistics</h2>
+                <div class="metric">
+                    <span class="metric-label">Total vCPUs</span>
+                    <span class="metric-value" id="vcpu-count">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">VM Exits/sec</span>
+                    <span class="metric-value" id="vmexit-rate">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Avg Exit Latency</span>
+                    <span class="metric-value" id="avg-latency">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>💾 Memory</h2>
+                <div class="metric">
+                    <span class="metric-label">Page Faults/sec</span>
+                    <span class="metric-value" id="page-faults">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">EPT Violations</span>
+                    <span class="metric-value" id="ept-violations">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">MMIO Access</span>
+                    <span class="metric-value" id="mmio-access">-</span>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>🔄 I/O</h2>
+                <div class="metric">
+                    <span class="metric-label">Virtio Notifications</span>
+                    <span class="metric-value" id="virtio-notify">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">IRQ Injections</span>
+                    <span class="metric-value" id="irq-inject">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">PIO Operations</span>
+                    <span class="metric-value" id="pio-ops">-</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Fetch metrics periodically
+        async function fetchMetrics() {
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+                console.log('Health:', data);
+            } catch (e) {
+                console.error('Failed to fetch metrics:', e);
+            }
+        }
+        
+        // Initial fetch and periodic updates
+        fetchMetrics();
+        setInterval(fetchMetrics, 5000);
+    </script>
+</body>
+</html>
