@@ -70,6 +70,7 @@ class EventCollector:
         try:
             events_table = bpf.get_table('events')
             counter_table = bpf.get_table('event_counter')
+            print(f"  DEBUG: Got tables - events: {type(events_table)}, counter: {type(counter_table)}")
         except Exception as e:
             print(f"  Warning: Cannot get tables from {program_name}: {e}")
             return
@@ -81,15 +82,29 @@ class EventCollector:
             try:
                 # Get current counter
                 counter_key = 0
-                counter_val = counter_table[counter_key] if counter_key in counter_table else 0
-                current_max = counter_val.value if hasattr(counter_val, 'value') else int(counter_val)
+                try:
+                    counter_val = counter_table[counter_key]
+                    current_max = counter_val.value if hasattr(counter_val, 'value') else int(counter_val)
+                except (KeyError, Exception) as e:
+                    print(f"  DEBUG: Counter read error: {e}")
+                    current_max = 0
+                
+                # Debug: print counter value periodically
+                if last_event_id == 0 or current_max % 100 == 0:
+                    print(f"  DEBUG: Counter = {current_max}, last_id = {last_event_id}")
                 
                 # Read new events
+                events_read = 0
                 while last_event_id < current_max:
                     try:
-                        event = events_table[last_event_id]
+                        # Create proper key for hash lookup
+                        from ctypes import c_uint
+                        key = c_uint(last_event_id)
+                        event = events_table[key]
+                        print(f"  DEBUG: Read event {last_event_id}: vcpu_id={getattr(event, 'vcpu_id', 'N/A')}")
                         self.event_queue.put((program_name, event))
                         last_event_id += 1
+                        events_read += 1
                     except KeyError:
                         # Event not yet available, skip
                         last_event_id += 1
@@ -97,6 +112,9 @@ class EventCollector:
                     except Exception as e:
                         print(f"  Error reading event {last_event_id}: {e}")
                         break
+                
+                if events_read > 0:
+                    print(f"  DEBUG: Read {events_read} events this cycle")
                 
                 time.sleep(0.1)  # Poll every 100ms
                 
