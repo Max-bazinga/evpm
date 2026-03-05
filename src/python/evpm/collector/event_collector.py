@@ -88,14 +88,14 @@ class EventCollector:
         
         try:
             ring_buf.open_ring_buffer(callback)
-            # Use bpf.ring_buffer_poll() instead of ring_buf.poll()
+            # Use bpf.ring_buffer_poll() for ring buffer polling
             while self.running:
                 try:
                     bpf.ring_buffer_poll(timeout=100)
                 except Exception as e:
                     if self.running:
                         print(f"  Ring buffer poll error: {e}")
-                    time.sleep(0.1)
+                    time.sleep(0.01)
         except Exception as e:
             print(f"  Ring buffer setup error: {e}")
     
