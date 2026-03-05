@@ -115,7 +115,10 @@ def run_web(args):
     print(f"🌐 Starting web UI on port {args.port}...")
     
     from evpm.web.server import start_server
-    start_server(port=args.port, db_path=args.db)
+    from evpm.storage.metrics_store import MetricsStore
+    
+    store = MetricsStore(args.db)
+    start_server(store=store, port=args.port)
 
 
 def run_exporter(args):
