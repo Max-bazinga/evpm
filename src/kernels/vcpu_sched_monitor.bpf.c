@@ -3,9 +3,12 @@
  * 
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
  * Compile Once - Run Everywhere (CO-RE) compatible
+ * 
+ * Note: Using bpf_probe_read_kernel for compatibility with kernels
+ * that don't export tracepoint structs in BTF.
  */
 
-#include "vmlinux.h"  // CO-RE: generated from /sys/kernel/btf/vmlinux
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_tracing.h>
@@ -65,29 +68,27 @@ struct {
 char LICENSE[] SEC("license") = "GPL";
 
 /*
- * CO-RE: Use BPF_CORE_READ for field access
- * This handles kernel version differences automatically
+ * Tracepoint field offsets (may vary by kernel version)
+ * These are common offsets for kvm tracepoints
+ * trace_entry is 8 bytes, then comes the payload
  */
+#define TP_OFFSET_VCPU_ID 8
+
+/* Helper to read vcpu_id from kvm tracepoints */
+static __always_inline u32 read_vcpu_id(void *ctx)
+{
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + TP_OFFSET_VCPU_ID);
+    return vcpu_id;
+}
 
 /* Tracepoint: kvm_vcpu_run_begin 
- * CO-RE: Use args struct generated from BTF
+ * Compatible with kernels that don't export trace_event_raw_* in BTF
  */
 SEC("tp/kvm/kvm_vcpu_run_begin")
 int trace_vcpu_run_begin(void *ctx)
 {
-    /* 
-     * CO-RE: Access tracepoint args through __bpftrace_kern_ver
-     * The actual struct is generated from vmlinux.h
-     */
-    struct trace_event_raw_kvm_vcpu_run_begin___x {
-        u64 __do_not_use__;
-        unsigned int vcpu_id;
-    };
-    
-    struct trace_event_raw_kvm_vcpu_run_begin___x *args = ctx;
-    
-    /* CO-RE: Safe field access with BPF_CORE_READ */
-    unsigned int vcpu_id = BPF_CORE_READ(args, vcpu_id);
+    u32 vcpu_id = read_vcpu_id(ctx);
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -99,14 +100,14 @@ int trace_vcpu_run_begin(void *ctx)
         new_state.pid = pid;
         bpf_map_update_elem(&vcpu_states, &vcpu_id, &new_state, BPF_ANY);
     } else {
-        /* Direct access for own maps is safe */
         state->last_run_ns = now;
         state->pid = pid;
         state->schedule_count++;
     }
     
     /* Send event */
-    struct vcpu_sched_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    struct vcpu_sched_event *event = bpf_ringbuf_reserve(
+        &events, sizeof(*event), 0);
     if (event) {
         event->pid = pid;
         event->vcpu_id = vcpu_id;
@@ -124,23 +125,18 @@ int trace_vcpu_run_begin(void *ctx)
 SEC("tp/kvm/kvm_vcpu_run_end")
 int trace_vcpu_run_end(void *ctx)
 {
-    /* CO-RE compatible struct definition */
-    struct trace_event_raw_kvm_vcpu_run_end___x {
-        u64 __do_not_use__;
-        unsigned int vcpu_id;
-    };
-    
-    struct trace_event_raw_kvm_vcpu_run_end___x *args = ctx;
-    unsigned int vcpu_id = BPF_CORE_READ(args, vcpu_id);
+    u32 vcpu_id = read_vcpu_id(ctx);
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(
+        &vcpu_states, &vcpu_id);
     if (state && state->last_run_ns > 0) {
         u64 duration = now - state->last_run_ns;
         state->total_run_ns += duration;
         
-        struct vcpu_sched_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+        struct vcpu_sched_event *event = bpf_ringbuf_reserve(
+            &events, sizeof(*event), 0);
         if (event) {
             event->pid = pid;
             event->vcpu_id = vcpu_id;
@@ -159,22 +155,18 @@ int trace_vcpu_run_end(void *ctx)
 SEC("tp/kvm/kvm_vcpu_halt")
 int trace_vcpu_halt(void *ctx)
 {
-    struct trace_event_raw_kvm_vcpu_halt___x {
-        u64 __do_not_use__;
-        unsigned int vcpu_id;
-    };
-    
-    struct trace_event_raw_kvm_vcpu_halt___x *args = ctx;
-    unsigned int vcpu_id = BPF_CORE_READ(args, vcpu_id);
+    u32 vcpu_id = read_vcpu_id(ctx);
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(
+        &vcpu_states, &vcpu_id);
     if (state) {
         state->last_halt_ns = now;
     }
     
-    struct vcpu_sched_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    struct vcpu_sched_event *event = bpf_ringbuf_reserve(
+        &events, sizeof(*event), 0);
     if (event) {
         event->pid = pid;
         event->vcpu_id = vcpu_id;
@@ -192,22 +184,18 @@ int trace_vcpu_halt(void *ctx)
 SEC("tp/kvm/kvm_vcpu_wakeup")
 int trace_vcpu_wakeup(void *ctx)
 {
-    struct trace_event_raw_kvm_vcpu_wakeup___x {
-        u64 __do_not_use__;
-        unsigned int vcpu_id;
-    };
-    
-    struct trace_event_raw_kvm_vcpu_wakeup___x *args = ctx;
-    unsigned int vcpu_id = BPF_CORE_READ(args, vcpu_id);
+    u32 vcpu_id = read_vcpu_id(ctx);
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(
+        &vcpu_states, &vcpu_id);
     if (state && state->last_halt_ns > 0) {
         u64 halt_duration = now - state->last_halt_ns;
         state->total_halt_ns += halt_duration;
         
-        struct vcpu_sched_event *event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+        struct vcpu_sched_event *event = bpf_ringbuf_reserve(
+            &events, sizeof(*event), 0);
         if (event) {
             event->pid = pid;
             event->vcpu_id = vcpu_id;
