@@ -79,7 +79,9 @@ class EventCollector:
         
         def callback(ctx, data, size):
             try:
+                print(f"  DEBUG: Callback called for {program_name}")
                 event = ring_buf.event(data)
+                print(f"  DEBUG: Event data: vcpu_id={getattr(event, 'vcpu_id', 'N/A')}")
                 self.event_queue.put((program_name, event))
             except Exception as e:
                 print(f"  Callback error: {e}")
