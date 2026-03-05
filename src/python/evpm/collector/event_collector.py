@@ -86,11 +86,16 @@ class EventCollector:
         
         try:
             ring_buf.open_ring_buffer(callback)
+            # Use bpf.ring_buffer_poll() instead of ring_buf.poll()
             while self.running:
-                ring_buf.poll(timeout=100)
+                try:
+                    bpf.ring_buffer_poll(timeout=100)
+                except Exception as e:
+                    if self.running:
+                        print(f"  Ring buffer poll error: {e}")
+                    time.sleep(0.1)
         except Exception as e:
-            if self.running:
-                print(f"  Ring buffer error: {e}")
+            print(f"  Ring buffer setup error: {e}")
     
     def _process_events(self):
         """Process events from queue"""
