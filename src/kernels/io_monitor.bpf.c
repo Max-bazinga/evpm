@@ -4,12 +4,8 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
-/* Must define target arch before any BPF headers */
-#define __TARGET_ARCH_x86_64 1
-
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
-#include <bpf/bpf_tracing.h>
 
 /* dummy types for IRQ probes */
 struct kvm_kernel_irq_routing_entry { };
@@ -183,12 +179,25 @@ int trace_virtio_queue_notify(void *ctx)
     return 0;
 }
 
-/* Kprobe: kvm_set_irq - IRQ injection */
-SEC("kprobe/kvm_set_irq")
-int BPF_KPROBE(trace_kvm_set_irq, struct kvm_kernel_irq_routing_entry *e,
-               struct kvm *kvm, int irq_source_id, int level, bool line_status)
+/* Tracepoint: kvm_io - Port I/O */
+SEC("tp/kvm/kvm_io")
+int trace_kvm_io(void *ctx)
 {
-    u32 vcpu_id = 0; /* Could extract from kvm */
+    /* 
+     * trace_event_raw_kvm_io layout (may vary by kernel version):
+     * struct trace_entry ent;  // 8 bytes
+     * unsigned int vcpu_id;    // offset 8, size 4
+     * u32 type;                // offset 12, size 4
+     * u32 port;                // offset 16, size 4
+     * u32 len;                 // offset 20, size 4
+     */
+    u32 vcpu_id = 0, type = 0, port = 0, len = 0;
+    
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&type, sizeof(type), ctx + 12);
+    bpf_probe_read_kernel(&port, sizeof(port), ctx + 16);
+    bpf_probe_read_kernel(&len, sizeof(len), ctx + 20);
+    
     u64 now = bpf_ktime_get_ns();
     
     struct evpm_io_event *event = bpf_ringbuf_reserve(
@@ -197,22 +206,14 @@ int BPF_KPROBE(trace_kvm_set_irq, struct kvm_kernel_irq_routing_entry *e,
         event->pid = bpf_get_current_pid_tgid() >> 32;
         event->vcpu_id = vcpu_id;
         event->timestamp = now;
-        event->event_type = IO_IRQ_INJECT;
-        event->device_id = irq_source_id;
+        event->event_type = (type == 0) ? IO_PIO_READ : IO_PIO_WRITE;
+        event->device_id = port;
         event->vq_id = 0;
         event->duration_ns = 0;
-        event->data_len = level;
+        event->data_len = len;
         bpf_ringbuf_submit(event, 0);
     }
     
-    return 0;
-}
-
-/* Kprobe: kvm_ioapic_set_irq - IOAPIC IRQ handling */
-SEC("kprobe/kvm_ioapic_set_irq")
-int BPF_KPROBE(trace_ioapic_set_irq, void *ioapic, int irq, int level)
-{
-    /* Track IOAPIC interrupts */
     return 0;
 }
 
