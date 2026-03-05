@@ -15,6 +15,9 @@ typedef signed short s16;
 typedef signed int s32;
 typedef signed long long s64;
 
+/* SEC macro for section attributes */
+#define SEC(NAME) __attribute__((section(NAME), used))
+
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
 
