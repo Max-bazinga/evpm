@@ -5,6 +5,16 @@
  * NO includes needed - BCC provides everything
  */
 
+/* Basic types */
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef unsigned int u32;
+typedef unsigned long long u64;
+typedef signed char s8;
+typedef signed short s16;
+typedef signed int s32;
+typedef signed long long s64;
+
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256
 
