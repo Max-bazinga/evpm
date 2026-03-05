@@ -4,6 +4,9 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
+/* Must define target arch before any BPF headers */
+#define __TARGET_ARCH_x86_64 1
+
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
