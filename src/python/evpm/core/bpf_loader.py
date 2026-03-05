@@ -95,19 +95,15 @@ class BPFLoader:
             print(f"  Debug: BPF loaded, tables: {list(bpf.tables.keys()) if hasattr(bpf, 'tables') else 'N/A'}")
             self.programs[name] = bpf
             
-            print(f"  ✓ Loaded: {name}")
+            # 手动附加 kprobes
+            try:
+                if name == 'vcpu_sched':
+                    bpf.attach_kprobe(event='kvm_vcpu_run', fn_name='trace_vcpu_run')
+                    print(f"    Attached: kprobe:kvm_vcpu_run")
+            except Exception as e:
+                print(f"    Warning: Failed to attach kprobe: {e}")
             
-            # 检查已附加的探针
-            attached = []
-            if hasattr(bpf, 'tracepoints') and bpf.tracepoints:
-                attached.append(f"tracepoints:{len(bpf.tracepoints)}")
-                print(f"  Debug: tracepoints = {bpf.tracepoints}")
-            if hasattr(bpf, 'kprobes') and bpf.kprobes:
-                attached.append(f"kprobes:{len(bpf.kprobes)}")
-            if attached:
-                print(f"    Attached: {', '.join(attached)}")
-            else:
-                print(f"  Warning: No tracepoints or kprobes attached!")
+            print(f"  ✓ Loaded: {name}")
             
             return bpf
             
