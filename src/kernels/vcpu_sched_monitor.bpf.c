@@ -1,7 +1,5 @@
 /*
  * eBPF VM Performance Monitor - vCPU Scheduling Monitor (BCC)
- * 
- * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
  */
 
 /* Basic types */
@@ -9,13 +7,30 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
-typedef signed char s8;
-typedef signed short s16;
-typedef signed int s32;
-typedef signed long long s64;
 
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
+
+/* Tracepoint structure definitions */
+struct trace_kvm_vcpu_run_begin {
+    u64 pad;
+    u32 vcpu_id;
+};
+
+struct trace_kvm_vcpu_run_end {
+    u64 pad;
+    u32 vcpu_id;
+};
+
+struct trace_kvm_vcpu_halt {
+    u64 pad;
+    u32 vcpu_id;
+};
+
+struct trace_kvm_vcpu_wakeup {
+    u64 pad;
+    u32 vcpu_id;
+};
 
 /* Event types */
 enum vcpu_event_type {
