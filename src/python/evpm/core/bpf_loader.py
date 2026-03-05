@@ -144,10 +144,7 @@ class BPFLoader:
     
     def get_program(self, name: str) -> Optional[BPF]:
         """Get loaded BPF program by name"""
-        print(f"  DEBUG get_program: looking for '{name}', have keys: {list(self.programs.keys())}")
-        result = self.programs.get(name)
-        print(f"  DEBUG get_program: result is {result}")
-        return result
+        return self.programs.get(name)
     
     def get_ring_buffer(self, name: str, map_name: str = 'events'):
         """Get ring buffer from a BPF program"""
