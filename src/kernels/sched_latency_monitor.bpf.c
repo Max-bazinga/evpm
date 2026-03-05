@@ -22,7 +22,7 @@ struct sched_event {
 };
 
 /* Per-task scheduling state */
-struct evpm_evpm_sched_state {
+struct evpm_sched_state {
     __u64 enqueue_ts;
     __u32 vcpu_id;
 };
@@ -37,7 +37,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_PIDS);
     __type(key, __u32);
-    __type(value, struct evpm_evpm_sched_state);
+    __type(value, struct evpm_sched_state);
 } evpm_sched_states SEC("maps");
 
 /* Latency histogram (in microseconds) */
@@ -80,16 +80,19 @@ static __always_inline __u32 extract_vcpu_id(struct task_struct *task)
 
 /* Kprobe: enqueue_task_fair - Task is enqueued to run queue */
 SEC("kprobe/enqueue_task_fair")
-int BPF_KPROBE(trace_enqueue_task, struct rq *rq, struct task_struct *p, int flags)
+int trace_enqueue_task(void *ctx)
 {
+    /* Read task pointer from ctx (2nd arg) - x86_64: rdi=rq, rsi=task */
+    struct task_struct *p;
+    bpf_probe_read_kernel(&p, sizeof(p), ctx + sizeof(void*));
+    
     if (!is_qemu_task(p))
         return 0;
     
-    /* retrieve PID without dereferencing task_struct */
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     __u64 now = bpf_ktime_get_ns();
     
-    struct evpm_evpm_sched_state state = {};
+    struct evpm_sched_state state = {};
     state.enqueue_ts = now;
     state.vcpu_id = extract_vcpu_id(p);
     
@@ -100,14 +103,17 @@ int BPF_KPROBE(trace_enqueue_task, struct rq *rq, struct task_struct *p, int fla
 
 /* Kprobe: dequeue_task_fair - Task is dequeued from run queue */
 SEC("kprobe/dequeue_task_fair")
-int BPF_KPROBE(trace_dequeue_task, struct rq *rq, struct task_struct *p, int flags)
+int trace_dequeue_task(void *ctx)
 {
+    /* Read task pointer from ctx */
+    struct task_struct *p;
+    bpf_probe_read_kernel(&p, sizeof(p), ctx + sizeof(void*));
+    
     if (!is_qemu_task(p))
         return 0;
     
-    /* retrieve PID without dereferencing task_struct */
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    struct evpm_evpm_sched_state *state = bpf_map_lookup_elem(&evpm_sched_states, &pid);
+    struct evpm_sched_state *state = bpf_map_lookup_elem(&evpm_sched_states, &pid);
     
     if (!state || state->enqueue_ts == 0)
         return 0;
@@ -119,7 +125,6 @@ int BPF_KPROBE(trace_dequeue_task, struct rq *rq, struct task_struct *p, int fla
     __u64 latency_us = latency / 1000;
     __u32 bucket = 0;
     
-    /* Log2 bucketing: 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288 */
     #pragma unroll
     for (int i = 0; i < LATENCY_BUCKETS; i++) {
         if (latency_us < (1ULL << i)) {
@@ -138,7 +143,7 @@ int BPF_KPROBE(trace_dequeue_task, struct rq *rq, struct task_struct *p, int fla
     /* Send event if latency is high (> 10ms default) */
     __u32 thresh_key = 0;
     __u64 *threshold = bpf_map_lookup_elem(&latency_threshold, &thresh_key);
-    __u64 thresh_ns = threshold ? *threshold : 10000000ULL; /* 10ms default */
+    __u64 thresh_ns = threshold ? *threshold : 10000000ULL;
     
     if (latency > thresh_ns) {
         struct sched_event *event = bpf_ringbuf_reserve(&sched_events, sizeof(*event), 0);
@@ -161,9 +166,12 @@ int BPF_KPROBE(trace_dequeue_task, struct rq *rq, struct task_struct *p, int fla
 
 /* Kprobe: finish_task_switch - Context switch completed */
 SEC("kprobe/finish_task_switch")
-int BPF_KPROBE(trace_finish_task_switch, struct task_struct *prev)
+int trace_finish_task_switch(void *ctx)
 {
-    /* we can use current task without dereferencing fields */
+    /* Read prev task pointer from ctx (1st arg) */
+    struct task_struct *prev;
+    bpf_probe_read_kernel(&prev, sizeof(prev), ctx);
+    
     struct task_struct *current = (struct task_struct *)bpf_get_current_task();
     
     if (!is_qemu_task(current))
