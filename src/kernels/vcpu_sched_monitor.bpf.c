@@ -2,10 +2,10 @@
  * eBPF VM Performance Monitor - vCPU Scheduling Monitor (Pure BCC)
  * 
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
- * NO includes needed - BCC provides everything automatically
+ * Compatible with kernels without tracepoint struct definitions
  */
 
-/* Basic types - define explicitly for BCC compatibility */
+/* Basic types */
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -50,9 +50,18 @@ struct evpm_vcpu_state {
 BPF_RINGBUF_OUTPUT(events, 256 * 1024);
 BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
 
+/* 
+ * Tracepoint args layout for kvm tracepoints:
+ * struct trace_entry (8 bytes) + vcpu_id (4 bytes) + ...
+ * We use bpf_probe_read to safely access fields
+ */
+
 /* Tracepoint: kvm_vcpu_run_begin */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
-    u32 vcpu_id = args->vcpu_id;
+int trace_kvm_vcpu_run_begin(void *ctx)
+{
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -80,8 +89,11 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
 }
 
 /* Tracepoint: kvm_vcpu_run_end */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_end) {
-    u32 vcpu_id = args->vcpu_id;
+int trace_kvm_vcpu_run_end(void *ctx)
+{
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -104,8 +116,11 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_end) {
 }
 
 /* Tracepoint: kvm_vcpu_halt */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_halt) {
-    u32 vcpu_id = args->vcpu_id;
+int trace_kvm_vcpu_halt(void *ctx)
+{
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -126,8 +141,11 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_halt) {
 }
 
 /* Tracepoint: kvm_vcpu_wakeup */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_wakeup) {
-    u32 vcpu_id = args->vcpu_id;
+int trace_kvm_vcpu_wakeup(void *ctx)
+{
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
