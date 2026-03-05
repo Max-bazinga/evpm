@@ -39,6 +39,18 @@ struct vq_state {
     u16 vq_index;
 };
 
+/* I/O event for ring buffer */
+struct io_event {
+    u32 pid;
+    u32 vcpu_id;
+    u64 timestamp;
+    u32 event_type;
+    u32 device_id;
+    u16 vq_id;
+    u64 duration_ns;
+    u32 data_len;
+};
+
 /* Maps */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
