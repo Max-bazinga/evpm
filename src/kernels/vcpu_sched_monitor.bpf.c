@@ -44,17 +44,13 @@ BPF_RINGBUF_OUTPUT(events, 256 * 1024);
 BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
 
 /* 
- * Kprobe on kvm_vcpu_run (called when vCPU starts running)
- * This is a simpler alternative to tracepoints
+ * Kprobe on kvm_exit (called when vCPU exits guest mode)
  */
-int trace_vcpu_run(struct pt_regs *ctx)
+int trace_kvm_exit(struct pt_regs *ctx)
 {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
-    
-    // vcpu_id would need to be extracted from vcpu struct
-    // For now use PID as identifier
-    u32 vcpu_id = pid;
+    u32 vcpu_id = pid; // Use PID as identifier
     
     struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
     if (!state) {
@@ -62,15 +58,13 @@ int trace_vcpu_run(struct pt_regs *ctx)
         new_state.last_run_ns = now;
         new_state.pid = pid;
         vcpu_states.update(&vcpu_id, &new_state);
-    } else {
-        state->last_run_ns = now;
     }
     
     struct vcpu_sched_event event = {};
     event.pid = pid;
     event.vcpu_id = vcpu_id;
     event.timestamp = now;
-    event.event_type = VCPU_RUN_BEGIN;
+    event.event_type = VCPU_RUN_END; // VM Exit = run end
     bpf_get_current_comm(event.comm, sizeof(event.comm));
     events.ringbuf_output(&event, sizeof(event), 0);
     

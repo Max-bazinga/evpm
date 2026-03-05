@@ -98,8 +98,8 @@ class BPFLoader:
             # 手动附加 kprobes
             try:
                 if name == 'vcpu_sched':
-                    bpf.attach_kprobe(event='kvm_vcpu_run', fn_name='trace_vcpu_run')
-                    print(f"    Attached: kprobe:kvm_vcpu_run")
+                    bpf.attach_kprobe(event='kvm_exit', fn_name='trace_kvm_exit')
+                    print(f"    Attached: kprobe:kvm_exit")
             except Exception as e:
                 print(f"    Warning: Failed to attach kprobe: {e}")
             
