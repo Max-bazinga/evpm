@@ -6,6 +6,7 @@
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
+#include <bpf/bpf_tracing.h>
 
 /* dummy types for IRQ probes */
 struct kvm_kernel_irq_routing_entry { };
