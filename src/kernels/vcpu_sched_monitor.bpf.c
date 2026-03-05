@@ -1,5 +1,7 @@
 /*
- * eBPF VM Performance Monitor - vCPU Scheduling Monitor (Kprobe version)
+ * eBPF VM Performance Monitor - vCPU Scheduling Monitor (Working version)
+ * 
+ * Uses BPF_HASH instead of ring buffer due to BCC 0.26.0 issues
  */
 
 /* Basic types */
@@ -8,29 +10,19 @@ typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
-#define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
 
-/* Event types */
-enum vcpu_event_type {
-    VCPU_RUN_BEGIN = 1,
-    VCPU_RUN_END,
-    VCPU_HALT,
-    VCPU_WAKEUP,
-};
-
-/* vCPU scheduling event */
-struct vcpu_sched_event {
+/* Event structure */
+struct vcpu_event {
     u32 pid;
     u32 vcpu_id;
     u64 timestamp;
     u32 event_type;
     u64 duration_ns;
-    char comm[TASK_COMM_LEN];
 };
 
 /* Per-vCPU state */
-struct evpm_vcpu_state {
+struct vcpu_state {
     u64 last_run_ns;
     u64 last_halt_ns;
     u64 total_run_ns;
@@ -39,34 +31,72 @@ struct evpm_vcpu_state {
     u32 pid;
 };
 
-/* Maps - BCC style */
-BPF_RINGBUF_OUTPUT(events, 256 * 1024);
-BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
+/* Maps */
+BPF_HASH(events, u32, struct vcpu_event, 1024);
+BPF_HASH(vcpu_states, u32, struct vcpu_state, MAX_VCPUS);
 
-/* 
- * Kprobe on kvm_exit (called when vCPU exits guest mode)
- */
-int trace_kvm_exit(struct pt_regs *ctx)
-{
+/* Event counter for unique keys */
+BPF_ARRAY(event_counter, u32, 1);
+
+/* Helper to get next event ID */
+static __always_inline u32 get_next_event_id() {
+    u32 key = 0;
+    u32 *counter = event_counter.lookup(&key);
+    if (counter) {
+        u32 old_val = *counter;
+        *counter = old_val + 1;
+        return old_val;
+    }
+    return 0;
+}
+
+/* Tracepoint: kvm_exit */
+TRACEPOINT_PROBE(kvm, kvm_exit) {
+    u32 vcpu_id = args->vcpu_id;
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
-    u32 vcpu_id = pid; // Use PID as identifier
     
-    struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
+    // Update state
+    struct vcpu_state *state = vcpu_states.lookup(&vcpu_id);
     if (!state) {
-        struct evpm_vcpu_state new_state = {};
+        struct vcpu_state new_state = {};
         new_state.last_run_ns = now;
         new_state.pid = pid;
         vcpu_states.update(&vcpu_id, &new_state);
     }
     
-    struct vcpu_sched_event event = {};
+    // Store event
+    u32 event_id = get_next_event_id();
+    struct vcpu_event event = {};
     event.pid = pid;
     event.vcpu_id = vcpu_id;
     event.timestamp = now;
-    event.event_type = VCPU_RUN_END; // VM Exit = run end
-    bpf_get_current_comm(event.comm, sizeof(event.comm));
-    events.ringbuf_output(&event, sizeof(event), 0);
+    event.event_type = 2; // EXIT
+    events.update(&event_id, &event);
+    
+    return 0;
+}
+
+/* Tracepoint: kvm_entry */
+TRACEPOINT_PROBE(kvm, kvm_entry) {
+    u32 vcpu_id = args->vcpu_id;
+    u64 now = bpf_ktime_get_ns();
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    
+    struct vcpu_state *state = vcpu_states.lookup(&vcpu_id);
+    if (state && state->last_run_ns > 0) {
+        u64 duration = now - state->last_run_ns;
+        state->total_run_ns += duration;
+        
+        u32 event_id = get_next_event_id();
+        struct vcpu_event event = {};
+        event.pid = pid;
+        event.vcpu_id = vcpu_id;
+        event.timestamp = now;
+        event.event_type = 1; // ENTRY
+        event.duration_ns = duration;
+        events.update(&event_id, &event);
+    }
     
     return 0;
 }
