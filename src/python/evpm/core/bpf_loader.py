@@ -95,14 +95,7 @@ class BPFLoader:
             print(f"  Debug: BPF loaded, tables: {list(bpf.tables.keys()) if hasattr(bpf, 'tables') else 'N/A'}")
             self.programs[name] = bpf
             
-            # 手动附加 kprobes
-            try:
-                if name == 'vcpu_sched':
-                    bpf.attach_kprobe(event='kvm_exit', fn_name='trace_kvm_exit')
-                    print(f"    Attached: kprobe:kvm_exit")
-            except Exception as e:
-                print(f"    Warning: Failed to attach kprobe: {e}")
-            
+            # TRACEPOINT_PROBE macros auto-attach, no manual attachment needed
             print(f"  ✓ Loaded: {name}")
             
             return bpf
