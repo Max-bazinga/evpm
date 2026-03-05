@@ -90,7 +90,9 @@ class BPFLoader:
                 '-I/usr/include/i386-linux-gnu',     # x86
             ]
             # BCC 自动附加 tracepoints 和 kprobes（不需要手动遍历）
+            print(f"  Debug: Loading BPF from {src_path}")
             bpf = BPF(text=src, cflags=cflags, debug=0)
+            print(f"  Debug: BPF loaded, tables: {list(bpf.tables.keys()) if hasattr(bpf, 'tables') else 'N/A'}")
             self.programs[name] = bpf
             
             print(f"  ✓ Loaded: {name}")
@@ -99,10 +101,13 @@ class BPFLoader:
             attached = []
             if hasattr(bpf, 'tracepoints') and bpf.tracepoints:
                 attached.append(f"tracepoints:{len(bpf.tracepoints)}")
+                print(f"  Debug: tracepoints = {bpf.tracepoints}")
             if hasattr(bpf, 'kprobes') and bpf.kprobes:
                 attached.append(f"kprobes:{len(bpf.kprobes)}")
             if attached:
                 print(f"    Attached: {', '.join(attached)}")
+            else:
+                print(f"  Warning: No tracepoints or kprobes attached!")
             
             return bpf
             
