@@ -1,5 +1,5 @@
 /*
- * eBPF VM Performance Monitor - vCPU Scheduling Monitor (BCC)
+ * eBPF VM Performance Monitor - vCPU Scheduling Monitor (Kprobe version)
  */
 
 /* Basic types */
@@ -10,27 +10,6 @@ typedef unsigned long long u64;
 
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
-
-/* Tracepoint structure definitions */
-struct trace_kvm_vcpu_run_begin {
-    u64 pad;
-    u32 vcpu_id;
-};
-
-struct trace_kvm_vcpu_run_end {
-    u64 pad;
-    u32 vcpu_id;
-};
-
-struct trace_kvm_vcpu_halt {
-    u64 pad;
-    u32 vcpu_id;
-};
-
-struct trace_kvm_vcpu_wakeup {
-    u64 pad;
-    u32 vcpu_id;
-};
 
 /* Event types */
 enum vcpu_event_type {
@@ -64,11 +43,18 @@ struct evpm_vcpu_state {
 BPF_RINGBUF_OUTPUT(events, 256 * 1024);
 BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
 
-/* Use TRACEPOINT_PROBE for automatic attachment */
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
-    u32 vcpu_id = args->vcpu_id;
+/* 
+ * Kprobe on kvm_vcpu_run (called when vCPU starts running)
+ * This is a simpler alternative to tracepoints
+ */
+int trace_vcpu_run(struct pt_regs *ctx)
+{
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
+    
+    // vcpu_id would need to be extracted from vcpu struct
+    // For now use PID as identifier
+    u32 vcpu_id = pid;
     
     struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
     if (!state) {
@@ -78,8 +64,6 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
         vcpu_states.update(&vcpu_id, &new_state);
     } else {
         state->last_run_ns = now;
-        state->pid = pid;
-        state->schedule_count++;
     }
     
     struct vcpu_sched_event event = {};
@@ -89,73 +73,6 @@ TRACEPOINT_PROBE(kvm, kvm_vcpu_run_begin) {
     event.event_type = VCPU_RUN_BEGIN;
     bpf_get_current_comm(event.comm, sizeof(event.comm));
     events.ringbuf_output(&event, sizeof(event), 0);
-    
-    return 0;
-}
-
-TRACEPOINT_PROBE(kvm, kvm_vcpu_run_end) {
-    u32 vcpu_id = args->vcpu_id;
-    u64 now = bpf_ktime_get_ns();
-    u32 pid = bpf_get_current_pid_tgid() >> 32;
-    
-    struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
-    if (state && state->last_run_ns > 0) {
-        u64 duration = now - state->last_run_ns;
-        state->total_run_ns += duration;
-        
-        struct vcpu_sched_event event = {};
-        event.pid = pid;
-        event.vcpu_id = vcpu_id;
-        event.timestamp = now;
-        event.event_type = VCPU_RUN_END;
-        event.duration_ns = duration;
-        bpf_get_current_comm(event.comm, sizeof(event.comm));
-        events.ringbuf_output(&event, sizeof(event), 0);
-    }
-    
-    return 0;
-}
-
-TRACEPOINT_PROBE(kvm, kvm_vcpu_halt) {
-    u32 vcpu_id = args->vcpu_id;
-    u64 now = bpf_ktime_get_ns();
-    u32 pid = bpf_get_current_pid_tgid() >> 32;
-    
-    struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
-    if (state) {
-        state->last_halt_ns = now;
-    }
-    
-    struct vcpu_sched_event event = {};
-    event.pid = pid;
-    event.vcpu_id = vcpu_id;
-    event.timestamp = now;
-    event.event_type = VCPU_HALT;
-    bpf_get_current_comm(event.comm, sizeof(event.comm));
-    events.ringbuf_output(&event, sizeof(event), 0);
-    
-    return 0;
-}
-
-TRACEPOINT_PROBE(kvm, kvm_vcpu_wakeup) {
-    u32 vcpu_id = args->vcpu_id;
-    u64 now = bpf_ktime_get_ns();
-    u32 pid = bpf_get_current_pid_tgid() >> 32;
-    
-    struct evpm_vcpu_state *state = vcpu_states.lookup(&vcpu_id);
-    if (state && state->last_halt_ns > 0) {
-        u64 halt_duration = now - state->last_halt_ns;
-        state->total_halt_ns += halt_duration;
-        
-        struct vcpu_sched_event event = {};
-        event.pid = pid;
-        event.vcpu_id = vcpu_id;
-        event.timestamp = now;
-        event.event_type = VCPU_WAKEUP;
-        event.duration_ns = halt_duration;
-        bpf_get_current_comm(event.comm, sizeof(event.comm));
-        events.ringbuf_output(&event, sizeof(event), 0);
-    }
     
     return 0;
 }
