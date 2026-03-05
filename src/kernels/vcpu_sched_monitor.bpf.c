@@ -55,8 +55,9 @@ BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
 
 /* 
  * Tracepoint args layout for kvm tracepoints:
- * struct trace_entry (8 bytes) + vcpu_id (4 bytes) + ...
- * We use bpf_probe_read to safely access fields
+ * offset 0-7: trace_entry (8 bytes)
+ * offset 8-11: vcpu_id (4 bytes)
+ * offset 12-15: exit_reason (4 bytes) - for kvm_exit
  */
 
 /* Tracepoint: kvm_vcpu_run_begin */
