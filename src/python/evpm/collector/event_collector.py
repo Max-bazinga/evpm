@@ -61,43 +61,49 @@ class EventCollector:
                 print(f"  Warning: Thread {name} did not stop gracefully")
     
     def _consume_ring_buffer(self, program_name: str):
-        """Consume events from a BPF ring buffer"""
+        """Consume events from a BPF Hash table (poll-based for BCC 0.26.0 compatibility)"""
         bpf = self.bpf_loader.get_program(program_name)
         if not bpf:
             return
         
-        # Get ring buffer by name 'events'
+        # Get events hash table
         try:
-            ring_buf = bpf['events']
-        except KeyError:
-            print(f"  Warning: No 'events' ring buffer in {program_name}")
-            return
-        
-        if not hasattr(ring_buf, 'open_ring_buffer'):
-            print(f"  Warning: 'events' not a ring buffer in {program_name}")
-            return
-        
-        def callback(ctx, data, size):
-            try:
-                print(f"  DEBUG: Callback called for {program_name}")
-                event = ring_buf.event(data)
-                print(f"  DEBUG: Event data: vcpu_id={getattr(event, 'vcpu_id', 'N/A')}")
-                self.event_queue.put((program_name, event))
-            except Exception as e:
-                print(f"  Callback error: {e}")
-        
-        try:
-            ring_buf.open_ring_buffer(callback)
-            # Use bpf.ring_buffer_poll() for ring buffer polling
-            while self.running:
-                try:
-                    bpf.ring_buffer_poll(timeout=100)
-                except Exception as e:
-                    if self.running:
-                        print(f"  Ring buffer poll error: {e}")
-                    time.sleep(0.01)
+            events_table = bpf.get_table('events')
+            counter_table = bpf.get_table('event_counter')
         except Exception as e:
-            print(f"  Ring buffer setup error: {e}")
+            print(f"  Warning: Cannot get tables from {program_name}: {e}")
+            return
+        
+        last_event_id = 0
+        print(f"  Polling hash table for {program_name}")
+        
+        while self.running:
+            try:
+                # Get current counter
+                counter_key = 0
+                counter_val = counter_table[counter_key] if counter_key in counter_table else 0
+                current_max = counter_val.value if hasattr(counter_val, 'value') else int(counter_val)
+                
+                # Read new events
+                while last_event_id < current_max:
+                    try:
+                        event = events_table[last_event_id]
+                        self.event_queue.put((program_name, event))
+                        last_event_id += 1
+                    except KeyError:
+                        # Event not yet available, skip
+                        last_event_id += 1
+                        break
+                    except Exception as e:
+                        print(f"  Error reading event {last_event_id}: {e}")
+                        break
+                
+                time.sleep(0.1)  # Poll every 100ms
+                
+            except Exception as e:
+                if self.running:
+                    print(f"  Hash table poll error: {e}")
+                time.sleep(0.5)
     
     def _process_events(self):
         """Process events from queue"""
