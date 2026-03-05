@@ -7,11 +7,6 @@
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
-/* forward declaration to satisfy prototypes without full definition */
-struct task_struct;
-/* forward declaration to satisfy prototypes without full definition */
-struct task_struct;
-
 #define TASK_COMM_LEN 16
 #define MAX_PIDS 1024
 #define LATENCY_BUCKETS 20
@@ -27,7 +22,7 @@ struct sched_event {
 };
 
 /* Per-task scheduling state */
-struct sched_state {
+struct evpm_evpm_sched_state {
     __u64 enqueue_ts;
     __u32 vcpu_id;
 };
@@ -42,8 +37,8 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_PIDS);
     __type(key, __u32);
-    __type(value, struct sched_state);
-} sched_states SEC("maps");
+    __type(value, struct evpm_evpm_sched_state);
+} evpm_sched_states SEC("maps");
 
 /* Latency histogram (in microseconds) */
 struct {
@@ -94,11 +89,11 @@ int BPF_KPROBE(trace_enqueue_task, struct rq *rq, struct task_struct *p, int fla
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
     __u64 now = bpf_ktime_get_ns();
     
-    struct sched_state state = {};
+    struct evpm_evpm_sched_state state = {};
     state.enqueue_ts = now;
     state.vcpu_id = extract_vcpu_id(p);
     
-    bpf_map_update_elem(&sched_states, &pid, &state, BPF_ANY);
+    bpf_map_update_elem(&evpm_sched_states, &pid, &state, BPF_ANY);
     
     return 0;
 }
@@ -112,7 +107,7 @@ int BPF_KPROBE(trace_dequeue_task, struct rq *rq, struct task_struct *p, int fla
     
     /* retrieve PID without dereferencing task_struct */
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    struct sched_state *state = bpf_map_lookup_elem(&sched_states, &pid);
+    struct evpm_evpm_sched_state *state = bpf_map_lookup_elem(&evpm_sched_states, &pid);
     
     if (!state || state->enqueue_ts == 0)
         return 0;
