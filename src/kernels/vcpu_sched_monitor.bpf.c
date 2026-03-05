@@ -35,7 +35,7 @@ struct vcpu_sched_event {
 };
 
 /* Per-vCPU state */
-struct vcpu_state {
+struct evpm_vcpu_state {
     u64 last_run_ns;
     u64 last_halt_ns;
     u64 total_run_ns;
@@ -54,8 +54,8 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_VCPUS);
     __type(key, u32);
-    __type(value, struct vcpu_state);
-} vcpu_states SEC(".maps");
+    __type(value, struct evpm_vcpu_state);
+} evpm_vcpu_states SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -93,12 +93,12 @@ int trace_vcpu_run_begin(void *ctx)
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
     /* Update vCPU state */
-    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
+    struct evpm_vcpu_state *state = bpf_map_lookup_elem(&evpm_vcpu_states, &vcpu_id);
     if (!state) {
-        struct vcpu_state new_state = {};
+        struct evpm_vcpu_state new_state = {};
         new_state.last_run_ns = now;
         new_state.pid = pid;
-        bpf_map_update_elem(&vcpu_states, &vcpu_id, &new_state, BPF_ANY);
+        bpf_map_update_elem(&evpm_vcpu_states, &vcpu_id, &new_state, BPF_ANY);
     } else {
         state->last_run_ns = now;
         state->pid = pid;
@@ -129,8 +129,8 @@ int trace_vcpu_run_end(void *ctx)
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(
-        &vcpu_states, &vcpu_id);
+    struct evpm_vcpu_state *state = bpf_map_lookup_elem(
+        &evpm_vcpu_states, &vcpu_id);
     if (state && state->last_run_ns > 0) {
         u64 duration = now - state->last_run_ns;
         state->total_run_ns += duration;
@@ -159,8 +159,8 @@ int trace_vcpu_halt(void *ctx)
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(
-        &vcpu_states, &vcpu_id);
+    struct evpm_vcpu_state *state = bpf_map_lookup_elem(
+        &evpm_vcpu_states, &vcpu_id);
     if (state) {
         state->last_halt_ns = now;
     }
@@ -188,8 +188,8 @@ int trace_vcpu_wakeup(void *ctx)
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = bpf_map_lookup_elem(
-        &vcpu_states, &vcpu_id);
+    struct evpm_vcpu_state *state = bpf_map_lookup_elem(
+        &evpm_vcpu_states, &vcpu_id);
     if (state && state->last_halt_ns > 0) {
         u64 halt_duration = now - state->last_halt_ns;
         state->total_halt_ns += halt_duration;
