@@ -39,8 +39,8 @@ struct vq_state {
     u16 vq_index;
 };
 
-/* I/O event for ring buffer */
-struct io_event {
+/* I/O event for ring buffer - renamed to avoid conflict with vmlinux.h */
+struct evpm_io_event {
     u32 pid;
     u32 vcpu_id;
     u64 timestamp;
@@ -103,7 +103,7 @@ int trace_kvm_io(void *ctx)
     
     u64 now = bpf_ktime_get_ns();
     
-    struct io_event *event = bpf_ringbuf_reserve(
+    struct evpm_io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
     if (event) {
         event->pid = bpf_get_current_pid_tgid() >> 32;
@@ -162,7 +162,7 @@ int trace_virtio_queue_notify(void *ctx)
         stat->notify_count++;
     }
     
-    struct io_event *event = bpf_ringbuf_reserve(
+    struct evpm_io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
     if (event) {
         event->pid = bpf_get_current_pid_tgid() >> 32;
@@ -187,7 +187,7 @@ int BPF_KPROBE(trace_kvm_set_irq, struct kvm_kernel_irq_routing_entry *e,
     u32 vcpu_id = 0; /* Could extract from kvm */
     u64 now = bpf_ktime_get_ns();
     
-    struct io_event *event = bpf_ringbuf_reserve(
+    struct evpm_io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
     if (event) {
         event->pid = bpf_get_current_pid_tgid() >> 32;
@@ -224,7 +224,7 @@ int trace_kvm_ack_irq(void *ctx)
     
     u64 now = bpf_ktime_get_ns();
     
-    struct io_event *event = bpf_ringbuf_reserve(
+    struct evpm_io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
     if (event) {
         event->pid = bpf_get_current_pid_tgid() >> 32;
