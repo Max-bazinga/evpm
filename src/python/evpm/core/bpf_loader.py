@@ -80,11 +80,16 @@ class BPFLoader:
         
         # Compile and load BPF program with include paths
         try:
-            # 添加系统 BPF 头文件路径
-            bpf = BPF(text=src, 
-                     cflags=['-I/usr/include',
-                            f'-I{self.kernel_src_dir}',
-                            '-I/usr/include/bpf'])
+            # 添加系统 BPF 头文件路径（多架构支持）
+            cflags = [
+                '-I/usr/include',
+                f'-I{self.kernel_src_dir}',
+                '-I/usr/include/bpf',
+                '-I/usr/include/x86_64-linux-gnu',  # Debian/Ubuntu x86_64
+                '-I/usr/include/aarch64-linux-gnu',  # ARM64
+                '-I/usr/include/i386-linux-gnu',     # x86
+            ]
+            bpf = BPF(text=src, cflags=cflags)
             self.programs[name] = bpf
             
             # Auto-attach tracepoints and kprobes
