@@ -4,7 +4,7 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
-#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 /* dummy types for IRQ probes */

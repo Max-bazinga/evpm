@@ -4,7 +4,7 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
-#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 /* minimal trace event stubs */
