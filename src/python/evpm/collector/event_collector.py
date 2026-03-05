@@ -66,7 +66,8 @@ class EventCollector:
         print(f"  DEBUG: Available programs: {list(self.bpf_loader.programs.keys())}")
         
         bpf = self.bpf_loader.get_program(program_name)
-        if not bpf:
+        print(f"  DEBUG: bpf type = {type(bpf)}, value = {bpf}")
+        if bpf is None:
             print(f"  DEBUG: No BPF program for {program_name}")
             return
         
