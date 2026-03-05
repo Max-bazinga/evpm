@@ -2,199 +2,164 @@
  * eBPF VM Performance Monitor - Memory Virtualization Monitor
  * 
  * Monitors EPT/NPT page faults, TLB misses, and memory access patterns
+ * Compatible version without BPF_KPROBE
  */
 
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
-/* minimal kernel type stubs to satisfy compilation without full vmlinux.h */
+/* Forward declarations - use void* to avoid kernel struct definitions */
 typedef __u64 gpa_t;
-struct kvm_vcpu { __u32 vcpu_id; };
-struct kvm_page_fault { };
 
-struct trace_event_raw_kvm_page_fault {
-    __u32 vcpu_id;
-    __u64 gpa;
-    __u64 gva;
-    __u32 error_code;
-};
-struct trace_event_raw_kvm_mmu_page_zoom { };
-struct trace_event_raw_kvm_mmio {
-    __u32 vcpu_id;
-    __u64 phys_addr;
-    __u32 len;
-};
-
-#define MAX_VCPUS 256
-#define MAX_FAULT_REASONS 16
-
-/* Memory event types */
-enum mm_event_type {
-    MM_EPT_VIOLATION = 1,
-    MM_PAGE_FAULT,
-    MM_TLB_MISS,
-    MM_MMIO_ACCESS,
-};
-
-/* Memory event */
 struct mm_event {
     u32 pid;
     u32 vcpu_id;
     u64 timestamp;
     u32 event_type;
-    u64 guest_pa;
-    u64 guest_va;
+    u64 gpa;
+    u64 gva;
     u32 error_code;
-    u64 handle_duration_ns;
+    u64 duration_ns;
 };
 
-/* Per-vCPU memory statistics */
+#define MAX_VCPUS 256
+#define MAX_FAULT_REASONS 16
+
+/* Event types */
+enum mm_event_type {
+    MM_PAGE_FAULT = 1,
+    MM_EPT_VIOLATION,
+    MM_TLB_MISS,
+    MM_MMU_ZOOM,
+    MM_MMIO_ACCESS,
+    MM_VCPU_LOAD,
+};
+
+/* Per-vCPU MM statistics */
 struct mm_stat {
     u64 page_fault_count;
     u64 ept_violation_count;
     u64 mmio_count;
-    u64 total_handle_ns;
-    u64 max_handle_ns;
+    u64 tlb_miss_count;
+    u64 total_fault_ns;
+    u64 max_fault_ns;
 };
 
 /* Maps */
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
     __uint(max_entries, 512 * 1024);
-} mm_events SEC("maps");
+} mm_events SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_VCPUS);
     __type(key, u32);
     __type(value, struct mm_stat);
-} mm_stats SEC("maps");
-
-/* Page fault handling state */
-struct pf_state {
-    u64 start_ts;
-    u64 guest_pa;
-    u64 guest_va;
-    u32 error_code;
-};
+} mm_stats SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __uint(max_entries, MAX_VCPUS);
     __type(key, u32);
-    __type(value, struct pf_state);
-} pf_states SEC("maps");
+    __type(value, u64);
+} fault_start_ts SEC(".maps");
 
-/* Error code flags */
-#define PFERR_PRESENT_BIT 0
-#define PFERR_WRITE_BIT 1
-#define PFERR_USER_BIT 2
-#define PFERR_RSVD_BIT 3
-#define PFERR_FETCH_BIT 4
-#define PFERR_PK_BIT 5
-#define PFERR_SGX_BIT 15
+char LICENSE[] SEC("license") = "GPL";
 
-/* Helper: Get human-readable error code description */
-static __always_inline u32 decode_error_code(u32 error_code)
+/* Helper: update MM stats */
+static __always_inline void update_mm_stats(u32 vcpu_id, u32 event_type, u64 duration)
 {
-    return error_code; /* Pass through for user space decoding */
-}
-
-/* Tracepoint: kvm_page_fault - EPT/NPT page fault */
-SEC("tp/kvm/kvm_page_fault")
-int trace_kvm_page_fault(struct trace_event_raw_kvm_page_fault *ctx)
-{
-    u32 vcpu_id = ctx->vcpu_id;
-    u64 guest_pa = ctx->gpa;
-    u64 guest_va = ctx->gva;
-    u32 error_code = ctx->error_code;
-    u64 now = bpf_ktime_get_ns();
-    
-    /* Update statistics */
     struct mm_stat *stat = bpf_map_lookup_elem(&mm_stats, &vcpu_id);
     if (!stat) {
         struct mm_stat new_stat = {};
-        new_stat.page_fault_count = 1;
+        if (event_type == MM_PAGE_FAULT)
+            new_stat.page_fault_count = 1;
+        else if (event_type == MM_EPT_VIOLATION)
+            new_stat.ept_violation_count = 1;
+        else if (event_type == MM_MMIO_ACCESS)
+            new_stat.mmio_count = 1;
+        else if (event_type == MM_TLB_MISS)
+            new_stat.tlb_miss_count = 1;
         bpf_map_update_elem(&mm_stats, &vcpu_id, &new_stat, BPF_ANY);
     } else {
-        stat->page_fault_count++;
+        if (event_type == MM_PAGE_FAULT)
+            stat->page_fault_count++;
+        else if (event_type == MM_EPT_VIOLATION)
+            stat->ept_violation_count++;
+        else if (event_type == MM_MMIO_ACCESS)
+            stat->mmio_count++;
+        else if (event_type == MM_TLB_MISS)
+            stat->tlb_miss_count++;
+        stat->total_fault_ns += duration;
+        if (duration > stat->max_fault_ns)
+            stat->max_fault_ns = duration;
     }
+}
+
+/* Tracepoint: kvm_page_fault - EPT/NPT page fault */
+/* Layout: trace_entry (8) + vcpu_id (4) + gpa (8) + gva (8) + error_code (4) */
+SEC("tp/kvm/kvm_page_fault")
+int trace_kvm_page_fault(void *ctx)
+{
+    u32 vcpu_id = 0;
+    u64 gpa = 0, gva = 0;
+    u32 error_code = 0;
     
-    /* Store state for duration tracking */
-    struct pf_state new_state = {};
-    new_state.start_ts = now;
-    new_state.guest_pa = guest_pa;
-    new_state.guest_va = guest_va;
-    new_state.error_code = error_code;
-    bpf_map_update_elem(&pf_states, &vcpu_id, &new_state, BPF_ANY);
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&gpa, sizeof(gpa), ctx + 16);
+    bpf_probe_read_kernel(&gva, sizeof(gva), ctx + 24);
+    bpf_probe_read_kernel(&error_code, sizeof(error_code), ctx + 32);
     
-    /* Send event */
-    struct mm_event *event = bpf_ringbuf_reserve(&mm_events, sizeof(*event), 0);
+    u64 now = bpf_ktime_get_ns();
+    
+    /* Record fault start time for duration calculation */
+    bpf_map_update_elem(&fault_start_ts, &vcpu_id, &now, BPF_ANY);
+    
+    struct mm_event *event = bpf_ringbuf_reserve(
+        &mm_events, sizeof(*event), 0);
     if (event) {
         event->pid = bpf_get_current_pid_tgid() >> 32;
         event->vcpu_id = vcpu_id;
         event->timestamp = now;
         event->event_type = MM_PAGE_FAULT;
-        event->guest_pa = guest_pa;
-        event->guest_va = guest_va;
+        event->gpa = gpa;
+        event->gva = gva;
         event->error_code = error_code;
-        event->handle_duration_ns = 0;
+        event->duration_ns = 0;
         bpf_ringbuf_submit(event, 0);
     }
     
     return 0;
 }
 
-/* Tracepoint: kvm_mmu_page_zoom - MMU page zoom (huge page) */
-SEC("tp/kvm/kvm_mmu_page_zoom")
-int trace_mmu_page_zoom(struct trace_event_raw_kvm_mmu_page_zoom *ctx)
+/* Kprobe: kvm_mmu_page_fault entry - TDP page fault start */
+SEC("kprobe/kvm_mmu_page_fault")
+int trace_mmu_page_fault_entry(void *ctx)
 {
-    /* Track huge page usage */
-    return 0;
-}
-
-/* Kprobe: handle_ept_violation - EPT violation handler entry */
-SEC("kprobe/kvm_x86_ops->handle_ept_violation")
-int BPF_KPROBE(trace_ept_violation_entry, struct kvm_vcpu *vcpu, 
-               gpa_t gpa, u64 error_code)
-{
-    u32 vcpu_id = vcpu->vcpu_id;
     u64 now = bpf_ktime_get_ns();
+    u32 vcpu_id = 0; /* Could extract from vcpu pointer at offset */
     
-    struct mm_stat *stat = bpf_map_lookup_elem(&mm_stats, &vcpu_id);
-    if (stat) {
-        stat->ept_violation_count++;
-    }
-    
-    /* Update state */
-    struct pf_state *state = bpf_map_lookup_elem(&pf_states, &vcpu_id);
-    if (state) {
-        state->start_ts = now;
-    }
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_map_update_elem(&fault_start_ts, &vcpu_id, &now, BPF_ANY);
     
     return 0;
 }
 
-/* Kprobe: tdp_page_fault - TDP (Two-Dimensional Paging) fault handler */
-SEC("kprobe/tdp_page_fault")
-int BPF_KPROBE(trace_tdp_page_fault, struct kvm_vcpu *vcpu, 
-               struct kvm_page_fault *fault)
+/* Kprobe: kvm_mmu_page_fault exit - TDP page fault end */
+SEC("kprobe/kvm_mmu_page_fault")
+int trace_mmu_page_fault_exit(void *ctx)
 {
-    u32 vcpu_id = vcpu->vcpu_id;
-    u64 now = bpf_ktime_get_ns();
+    u32 vcpu_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
     
-    struct pf_state *state = bpf_map_lookup_elem(&pf_states, &vcpu_id);
-    if (state && state->start_ts > 0) {
-        u64 duration = now - state->start_ts;
+    u64 now = bpf_ktime_get_ns();
+    u64 *start = bpf_map_lookup_elem(&fault_start_ts, &vcpu_id);
+    
+    if (start) {
+        u64 duration = now - *start;
+        update_mm_stats(vcpu_id, MM_PAGE_FAULT, duration);
         
-        struct mm_stat *stat = bpf_map_lookup_elem(&mm_stats, &vcpu_id);
-        if (stat) {
-            stat->total_handle_ns += duration;
-            if (duration > stat->max_handle_ns)
-                stat->max_handle_ns = duration;
-        }
-        
-        /* Send completion event */
         struct mm_event *event = bpf_ringbuf_reserve(
             &mm_events, sizeof(*event), 0);
         if (event) {
@@ -202,43 +167,32 @@ int BPF_KPROBE(trace_tdp_page_fault, struct kvm_vcpu *vcpu,
             event->vcpu_id = vcpu_id;
             event->timestamp = now;
             event->event_type = MM_EPT_VIOLATION;
-            event->guest_pa = state->guest_pa;
-            event->guest_va = state->guest_va;
-            event->error_code = state->error_code;
-            event->handle_duration_ns = duration;
+            event->gpa = 0;
+            event->gva = 0;
+            event->error_code = 0;
+            event->duration_ns = duration;
             bpf_ringbuf_submit(event, 0);
         }
-        
-        state->start_ts = 0;
     }
-    
-    return 0;
-}
-
-/* Kprobe: kvm_arch_vcpu_load - vCPU load (TLB flush tracking) */
-SEC("kprobe/kvm_arch_vcpu_load")
-int BPF_KPROBE(trace_vcpu_load, struct kvm_vcpu *vcpu, int cpu)
-{
-    /* Track vCPU migration between physical CPUs (TLB implications) */
-    u32 vcpu_id = vcpu->vcpu_id;
-    u32 new_cpu = cpu;
-    
-    /* Could track vCPU pinning/migration patterns */
     
     return 0;
 }
 
 /* Tracepoint: kvm_mmio - MMIO access */
+/* Layout: trace_entry (8) + vcpu_id (4) + phys_addr (8) + len (4) */
 SEC("tp/kvm/kvm_mmio")
-int trace_kvm_mmio(struct trace_event_raw_kvm_mmio *ctx)
+int trace_kvm_mmio(void *ctx)
 {
-    u32 vcpu_id = ctx->vcpu_id;
-    u64 now = bpf_ktime_get_ns();
+    u32 vcpu_id = 0;
+    u64 phys_addr = 0;
+    u32 len = 0;
     
-    struct mm_stat *stat = bpf_map_lookup_elem(&mm_stats, &vcpu_id);
-    if (stat) {
-        stat->mmio_count++;
-    }
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&phys_addr, sizeof(phys_addr), ctx + 16);
+    bpf_probe_read_kernel(&len, sizeof(len), ctx + 24);
+    
+    u64 now = bpf_ktime_get_ns();
+    update_mm_stats(vcpu_id, MM_MMIO_ACCESS, 0);
     
     struct mm_event *event = bpf_ringbuf_reserve(
         &mm_events, sizeof(*event), 0);
@@ -247,14 +201,38 @@ int trace_kvm_mmio(struct trace_event_raw_kvm_mmio *ctx)
         event->vcpu_id = vcpu_id;
         event->timestamp = now;
         event->event_type = MM_MMIO_ACCESS;
-        event->guest_pa = ctx->phys_addr;
-        event->guest_va = 0;
-        event->error_code = ctx->len;
-        event->handle_duration_ns = 0;
+        event->gpa = phys_addr;
+        event->gva = 0;
+        event->error_code = len;
+        event->duration_ns = 0;
         bpf_ringbuf_submit(event, 0);
     }
     
     return 0;
 }
 
-char LICENSE[] SEC("license") = "GPL";
+/* Kprobe: vcpu_load - vCPU memory context load */
+SEC("kprobe/vcpu_load")
+int trace_vcpu_load(void *ctx)
+{
+    u64 now = bpf_ktime_get_ns();
+    u32 vcpu_id = 0;
+    
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    
+    struct mm_event *event = bpf_ringbuf_reserve(
+        &mm_events, sizeof(*event), 0);
+    if (event) {
+        event->pid = bpf_get_current_pid_tgid() >> 32;
+        event->vcpu_id = vcpu_id;
+        event->timestamp = now;
+        event->event_type = MM_VCPU_LOAD;
+        event->gpa = 0;
+        event->gva = 0;
+        event->error_code = 0;
+        event->duration_ns = 0;
+        bpf_ringbuf_submit(event, 0);
+    }
+    
+    return 0;
+}
