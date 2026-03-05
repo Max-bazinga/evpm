@@ -57,6 +57,7 @@ BPF_HASH(vcpu_states, u32, struct evpm_vcpu_state, MAX_VCPUS);
  */
 
 /* Tracepoint: kvm_vcpu_run_begin */
+SEC("tracepoint/kvm/kvm_vcpu_run_begin")
 int trace_kvm_vcpu_run_begin(void *ctx)
 {
     u32 vcpu_id = 0;
@@ -89,6 +90,7 @@ int trace_kvm_vcpu_run_begin(void *ctx)
 }
 
 /* Tracepoint: kvm_vcpu_run_end */
+SEC("tracepoint/kvm/kvm_vcpu_run_end")
 int trace_kvm_vcpu_run_end(void *ctx)
 {
     u32 vcpu_id = 0;
@@ -116,6 +118,7 @@ int trace_kvm_vcpu_run_end(void *ctx)
 }
 
 /* Tracepoint: kvm_vcpu_halt */
+SEC("tracepoint/kvm/kvm_vcpu_halt")
 int trace_kvm_vcpu_halt(void *ctx)
 {
     u32 vcpu_id = 0;
@@ -141,6 +144,7 @@ int trace_kvm_vcpu_halt(void *ctx)
 }
 
 /* Tracepoint: kvm_vcpu_wakeup */
+SEC("tracepoint/kvm/kvm_vcpu_wakeup")
 int trace_kvm_vcpu_wakeup(void *ctx)
 {
     u32 vcpu_id = 0;

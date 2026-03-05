@@ -106,23 +106,25 @@ class BPFLoader:
         """Automatically attach tracepoints and kprobes"""
         attached = []
         
-        # Attach tracepoints
-        for tp in bpf.tracepoints:
+        # Attach tracepoints (using attach_tracepoint for SEC-defined probes)
+        for tp_name, tp_fn in bpf.tracepoints.items():
             try:
-                bpf.tracepoint_load(tp)
-                attached.append(f"tp:{tp}")
+                # tp_name is like "kvm:kvm_vcpu_run_begin"
+                parts = tp_name.split(':')
+                if len(parts) == 2:
+                    category, event = parts
+                    bpf.attach_tracepoint(event=f"{category}:{event}", fn_name=tp_fn.name)
+                    attached.append(f"tp:{tp_name}")
             except Exception as e:
-                print(f"    Warning: Failed to attach tracepoint {tp}: {e}")
+                print(f"    Warning: Failed to attach tracepoint {tp_name}: {e}")
         
-        # Attach kprobes
-        for kprobe in bpf.kprobes:
+        # Also check for kprobes
+        for kprobe_name, kprobe_fn in bpf.kprobes.items():
             try:
-                # Extract function name from probe
-                fn_name = kprobe.name.decode() if isinstance(kprobe.name, bytes) else kprobe.name
-                bpf.attach_kprobe(event=fn_name, fn_name=fn_name)
-                attached.append(f"kp:{fn_name}")
+                bpf.attach_kprobe(event=kprobe_name, fn_name=kprobe_fn.name)
+                attached.append(f"kp:{kprobe_name}")
             except Exception as e:
-                print(f"    Warning: Failed to attach kprobe {kprobe}: {e}")
+                print(f"    Warning: Failed to attach kprobe {kprobe_name}: {e}")
         
         if attached:
             print(f"    Attached: {', '.join(attached)}")
