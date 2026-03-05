@@ -20,6 +20,7 @@ PIP := pip3
 # Flags - CO-RE compatible
 BPF_CFLAGS := -target bpf
 BPF_CFLAGS += -D__TARGET_ARCH_x86_64
+BPF_CFLAGS += -D__BPF_TRACING__
 BPF_CFLAGS += -I$(KERNEL_DIR)
 BPF_CFLAGS += -O2 -g
 # CO-RE: Preserve access index for field offsets
