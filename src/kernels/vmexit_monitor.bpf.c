@@ -1,20 +1,9 @@
 /*
- * eBPF VM Performance Monitor - VM Exit Monitor
+ * eBPF VM Performance Monitor - VM Exit Monitor (Pure BCC)
  * 
  * Monitors VM Exit events: count, reasons, duration
+ * NO includes needed - BCC provides everything
  */
-
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-
-/* minimal trace event stubs */
-struct trace_event_raw_kvm_exit {
-    __u32 vcpu_id;
-    __u32 exit_reason;
-};
-struct trace_event_raw_kvm_entry {
-    __u32 vcpu_id;
-};
 
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256
@@ -46,31 +35,10 @@ struct vmexit_stat {
 };
 
 /* Maps - BCC style */
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 512 * 1024);
-} vmexit_events SEC("maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_VCPUS);
-    __type(key, u32);
-    __type(value, struct vmexit_state);
-} vmexit_states SEC("maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_EXIT_REASONS);
-    __type(key, u32);
-    __type(value, struct vmexit_stat);
-} vmexit_stats SEC("maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 20);
-    __type(key, u32);
-    __type(value, u64);
-} duration_hist SEC("maps");
+BPF_RINGBUF_OUTPUT(vmexit_events, 512 * 1024);
+BPF_HASH(vmexit_states, u32, struct vmexit_state, MAX_VCPUS);
+BPF_HASH(vmexit_stats, u32, struct vmexit_stat, MAX_EXIT_REASONS);
+BPF_HASH(duration_hist, u32, u64, 20);
 
 /* Pre-defined duration buckets (in microseconds) */
 static const u64 DURATION_BUCKETS[] = {
@@ -92,21 +60,19 @@ static __always_inline void update_duration_hist(u64 duration_ns)
     if (bucket == 0 && duration_us > 1000000)
         bucket = 19;
     
-    u64 *count = bpf_map_lookup_elem(&duration_hist, &bucket);
+    u64 *count = duration_hist.lookup(&bucket);
     if (count) {
         (*count)++;
     } else {
         u64 init = 1;
-        bpf_map_update_elem(&duration_hist, &bucket, &init, BPF_ANY);
+        duration_hist.update(&bucket, &init);
     }
 }
 
 /* Tracepoint: kvm_exit */
-SEC("tp/kvm/kvm_exit")
-int trace_kvm_exit(struct trace_event_raw_kvm_exit *ctx)
-{
-    u32 vcpu_id = ctx->vcpu_id;
-    u32 exit_reason = ctx->exit_reason;
+TRACEPOINT_PROBE(kvm, kvm_exit) {
+    u32 vcpu_id = args->vcpu_id;
+    u32 exit_reason = args->exit_reason;
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
@@ -114,32 +80,29 @@ int trace_kvm_exit(struct trace_event_raw_kvm_exit *ctx)
     struct vmexit_state state = {};
     state.exit_ts = now;
     state.exit_reason = exit_reason;
-    bpf_map_update_elem(&vmexit_states, &vcpu_id, &state, BPF_ANY);
+    vmexit_states.update(&vcpu_id, &state);
     
     /* Update statistics */
-    struct vmexit_stat *stat = bpf_map_lookup_elem(&vmexit_stats, &exit_reason);
+    struct vmexit_stat *stat = vmexit_stats.lookup(&exit_reason);
     if (stat) {
         stat->count++;
     } else {
         struct vmexit_stat new_stat = {};
         new_stat.count = 1;
         new_stat.min_duration_ns = ~0ULL;
-        bpf_map_update_elem(&vmexit_stats, &exit_reason, &new_stat, BPF_ANY);
+        vmexit_stats.update(&exit_reason, &new_stat);
     }
     
     return 0;
 }
 
 /* Tracepoint: kvm_entry */
-SEC("tp/kvm/kvm_entry")
-int trace_kvm_entry(struct trace_event_raw_kvm_entry *ctx)
-{
-    u32 vcpu_id = ctx->vcpu_id;
+TRACEPOINT_PROBE(kvm, kvm_entry) {
+    u32 vcpu_id = args->vcpu_id;
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vmexit_state *state = bpf_map_lookup_elem(
-        &vmexit_states, &vcpu_id);
+    struct vmexit_state *state = vmexit_states.lookup(&vcpu_id);
     if (!state || state->exit_ts == 0)
         return 0;
     
@@ -147,8 +110,7 @@ int trace_kvm_entry(struct trace_event_raw_kvm_entry *ctx)
     u32 exit_reason = state->exit_reason;
     
     /* Update statistics */
-    struct vmexit_stat *stat = bpf_map_lookup_elem(
-        &vmexit_stats, &exit_reason);
+    struct vmexit_stat *stat = vmexit_stats.lookup(&exit_reason);
     if (stat) {
         stat->total_duration_ns += duration;
         if (duration > stat->max_duration_ns)
@@ -161,23 +123,18 @@ int trace_kvm_entry(struct trace_event_raw_kvm_entry *ctx)
     update_duration_hist(duration);
     
     /* Send event */
-    struct vmexit_event *event = bpf_ringbuf_reserve(
-        &vmexit_events, sizeof(*event), 0);
-    if (event) {
-        event->pid = pid;
-        event->vcpu_id = vcpu_id;
-        event->timestamp = now;
-        event->exit_reason = exit_reason;
-        event->exit_qualification = 0;
-        event->guest_rip = state->guest_rip;
-        event->duration_ns = duration;
-        bpf_ringbuf_submit(event, 0);
-    }
+    struct vmexit_event event = {};
+    event.pid = pid;
+    event.vcpu_id = vcpu_id;
+    event.timestamp = now;
+    event.exit_reason = exit_reason;
+    event.exit_qualification = 0;
+    event.guest_rip = state->guest_rip;
+    event.duration_ns = duration;
+    vmexit_events.ringbuf_output(&event, sizeof(event), 0);
     
     /* Clear state */
     state->exit_ts = 0;
     
     return 0;
 }
-
-char LICENSE[] SEC("license") = "GPL";

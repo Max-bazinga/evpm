@@ -1,11 +1,9 @@
 /*
- * eBPF VM Performance Monitor - Scheduling Latency Monitor
+ * eBPF VM Performance Monitor - Scheduling Latency Monitor (Pure BCC)
  * 
  * Monitors scheduling latency for vCPU threads
+ * NO includes needed - BCC provides everything
  */
-
-#include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
 
 #define TASK_COMM_LEN 16
 #define MAX_PIDS 1024
@@ -13,186 +11,102 @@
 
 /* Scheduling event */
 struct sched_event {
-    __u32 pid;
-    __u32 vcpu_id;
-    __u64 enqueue_ts;
-    __u64 dequeue_ts;
-    __u64 latency_ns;
+    u32 pid;
+    u32 vcpu_id;
+    u64 enqueue_ts;
+    u64 dequeue_ts;
+    u64 latency_ns;
     char comm[TASK_COMM_LEN];
 };
 
 /* Per-task scheduling state */
 struct evpm_sched_state {
-    __u64 enqueue_ts;
-    __u32 vcpu_id;
+    u64 enqueue_ts;
+    u32 vcpu_id;
 };
 
-/* Maps */
-struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
-} sched_events SEC("maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, MAX_PIDS);
-    __type(key, __u32);
-    __type(value, struct evpm_sched_state);
-} evpm_sched_states SEC("maps");
-
-/* Latency histogram (in microseconds) */
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, LATENCY_BUCKETS);
-    __type(key, __u32);
-    __type(value, __u64);
-} latency_hist SEC("maps");
-
-/* Configuration: threshold for high latency events (default: 10ms) */
-struct {
-    __uint(type, BPF_MAP_TYPE_ARRAY);
-    __uint(max_entries, 1);
-    __type(key, __u32);
-    __type(value, __u64);
-} latency_threshold SEC("maps");
+/* Maps - BCC style */
+BPF_RINGBUF_OUTPUT(sched_events, 256 * 1024);
+BPF_HASH(evpm_sched_states, u32, struct evpm_sched_state, MAX_PIDS);
+BPF_HASH(latency_hist, u32, u64, LATENCY_BUCKETS);
+BPF_HASH(latency_threshold, u32, u64, 1);
 
 /* Helper: Check if task is QEMU/KVM process */
-static __always_inline bool is_qemu_task(struct task_struct *task)
+static __always_inline bool is_qemu_task(char *comm)
 {
-    char comm[TASK_COMM_LEN];
-    bpf_get_current_comm(comm, sizeof(comm));
-    
     /* Check for qemu-system-*, qemu-kvm, or kvms */
     if (comm[0] == 'q' && comm[1] == 'e' && comm[2] == 'm' && comm[3] == 'u')
         return true;
     if (comm[0] == 'k' && comm[1] == 'v' && comm[2] == 'm')
         return true;
-    
     return false;
 }
 
-/* Helper: Get vCPU ID from task comm (e.g., "qemu-system-86_64" -> extract CPU num) */
-static __always_inline __u32 extract_vcpu_id(struct task_struct *task)
-{
-    /* For now, use PID as vCPU ID mapping.  The provided task pointer is unused. */
-    return bpf_get_current_pid_tgid() >> 32;
-}
-
-/* Kprobe: enqueue_task_fair - Task is enqueued to run queue */
-SEC("kprobe/enqueue_task_fair")
-int trace_enqueue_task(void *ctx)
-{
-    /* Read task pointer from ctx (2nd arg) - x86_64: rdi=rq, rsi=task */
-    struct task_struct *p;
-    bpf_probe_read_kernel(&p, sizeof(p), ctx + sizeof(void*));
+/* Tracepoint: sched_switch - Context switch */
+TRACEPOINT_PROBE(sched, sched_switch) {
+    char comm[TASK_COMM_LEN];
+    bpf_get_current_comm(comm, sizeof(comm));
     
-    if (!is_qemu_task(p))
+    if (!is_qemu_task(comm))
         return 0;
     
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u64 now = bpf_ktime_get_ns();
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    u64 now = bpf_ktime_get_ns();
+    
+    /* For simplicity, just track the enqueue time */
+    struct evpm_sched_state *state = evpm_sched_states.lookup(&pid);
+    if (state && state->enqueue_ts > 0) {
+        u64 latency = now - state->enqueue_ts;
+        
+        /* Log2 bucketing */
+        u64 latency_us = latency / 1000;
+        u32 bucket = 0;
+        #pragma unroll
+        for (int i = 0; i < LATENCY_BUCKETS; i++) {
+            if (latency_us < (1ULL << i)) {
+                bucket = i;
+                break;
+            }
+        }
+        if (bucket >= LATENCY_BUCKETS)
+            bucket = LATENCY_BUCKETS - 1;
+        
+        u64 *count = latency_hist.lookup(&bucket);
+        if (count) {
+            (*count)++;
+        } else {
+            u64 init = 1;
+            latency_hist.update(&bucket, &init);
+        }
+        
+        /* Send event if high latency (> 10ms) */
+        if (latency > 10000000ULL) {
+            struct sched_event event = {};
+            event.pid = pid;
+            event.vcpu_id = state->vcpu_id;
+            event.enqueue_ts = state->enqueue_ts;
+            event.dequeue_ts = now;
+            event.latency_ns = latency;
+            bpf_get_current_comm(event.comm, sizeof(event.comm));
+            sched_events.ringbuf_output(&event, sizeof(event), 0);
+        }
+        
+        /* Clear state */
+        state->enqueue_ts = 0;
+    }
+    
+    return 0;
+}
+
+/* Kprobe: enqueue_task_fair - Task is enqueued */
+int trace_enqueue_task_fair(void *ctx) {
+    u32 pid = bpf_get_current_pid_tgid() >> 32;
+    u64 now = bpf_ktime_get_ns();
     
     struct evpm_sched_state state = {};
     state.enqueue_ts = now;
-    state.vcpu_id = extract_vcpu_id(p);
-    
-    bpf_map_update_elem(&evpm_sched_states, &pid, &state, BPF_ANY);
-    
-    return 0;
-}
-
-/* Kprobe: dequeue_task_fair - Task is dequeued from run queue */
-SEC("kprobe/dequeue_task_fair")
-int trace_dequeue_task(void *ctx)
-{
-    /* Read task pointer from ctx */
-    struct task_struct *p;
-    bpf_probe_read_kernel(&p, sizeof(p), ctx + sizeof(void*));
-    
-    if (!is_qemu_task(p))
-        return 0;
-    
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    struct evpm_sched_state *state = bpf_map_lookup_elem(&evpm_sched_states, &pid);
-    
-    if (!state || state->enqueue_ts == 0)
-        return 0;
-    
-    __u64 now = bpf_ktime_get_ns();
-    __u64 latency = now - state->enqueue_ts;
-    
-    /* Update histogram */
-    __u64 latency_us = latency / 1000;
-    __u32 bucket = 0;
-    
-    #pragma unroll
-    for (int i = 0; i < LATENCY_BUCKETS; i++) {
-        if (latency_us < (1ULL << i)) {
-            bucket = i;
-            break;
-        }
-    }
-    if (bucket >= LATENCY_BUCKETS)
-        bucket = LATENCY_BUCKETS - 1;
-    
-    __u64 *count = bpf_map_lookup_elem(&latency_hist, &bucket);
-    if (count) {
-        (*count)++;
-    }
-    
-    /* Send event if latency is high (> 10ms default) */
-    __u32 thresh_key = 0;
-    __u64 *threshold = bpf_map_lookup_elem(&latency_threshold, &thresh_key);
-    __u64 thresh_ns = threshold ? *threshold : 10000000ULL;
-    
-    if (latency > thresh_ns) {
-        struct sched_event *event = bpf_ringbuf_reserve(&sched_events, sizeof(*event), 0);
-        if (event) {
-            event->pid = pid;
-            event->vcpu_id = state->vcpu_id;
-            event->enqueue_ts = state->enqueue_ts;
-            event->dequeue_ts = now;
-            event->latency_ns = latency;
-            bpf_get_current_comm(event->comm, sizeof(event->comm));
-            bpf_ringbuf_submit(event, 0);
-        }
-    }
-    
-    /* Clear state */
-    state->enqueue_ts = 0;
+    state.vcpu_id = pid; /* Use PID as vCPU ID for now */
+    evpm_sched_states.update(&pid, &state);
     
     return 0;
 }
-
-/* Kprobe: finish_task_switch - Context switch completed */
-SEC("kprobe/finish_task_switch")
-int trace_finish_task_switch(void *ctx)
-{
-    /* Read prev task pointer from ctx (1st arg) */
-    struct task_struct *prev;
-    bpf_probe_read_kernel(&prev, sizeof(prev), ctx);
-    
-    struct task_struct *current = (struct task_struct *)bpf_get_current_task();
-    
-    if (!is_qemu_task(current))
-        return 0;
-    
-    /* Track when vCPU starts running */
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u64 now = bpf_ktime_get_ns();
-    
-    /* Could add more tracking here if needed */
-    
-    return 0;
-}
-
-/* Tracepoint: sched_switch handler removed to simplify compilation */
-/*
-SEC("tp/sched/sched_switch")
-int trace_sched_switch(struct trace_event_raw_sched_switch *ctx)
-{
-    return 0;
-}
-*/
-
-char LICENSE[] SEC("license") = "GPL";
