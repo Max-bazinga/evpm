@@ -4,6 +4,25 @@
  * Monitors EPT/NPT page faults, TLB misses, and memory access patterns
  */
 
+#include "bpf_helpers.h"
+
+/* minimal kernel type stubs to satisfy compilation without full vmlinux.h */
+typedef __u64 gpa_t;
+struct kvm_vcpu { __u32 vcpu_id; };
+struct kvm_page_fault { };
+
+struct trace_event_raw_kvm_page_fault {
+    __u32 vcpu_id;
+    __u64 gpa;
+    __u64 gva;
+    __u32 error_code;
+};
+struct trace_event_raw_kvm_mmu_page_zoom { };
+struct trace_event_raw_kvm_mmio {
+    __u32 vcpu_id;
+    __u64 phys_addr;
+    __u32 len;
+};
 
 #define MAX_VCPUS 256
 #define MAX_FAULT_REASONS 16
@@ -38,17 +57,17 @@ struct mm_stat {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_RINGBUF);
-     .max_entries = 512 * 1024);
-}; mm_events SEC(".maps");
+struct bpf_map_def SEC("maps") mm_events = {
+    .type = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 512 * 1024,
+};
 
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_HASH);
-     .max_entries = MAX_VCPUS);
-     .key_size = sizeof(u32);
-     .value_size = sizeof(struct mm_stat);
-}; mm_stats SEC(".maps");
+struct bpf_map_def SEC("maps") mm_stats = {
+    .type = BPF_MAP_TYPE_HASH,
+    .max_entries = MAX_VCPUS,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(struct mm_stat),
+};
 
 /* Page fault handling state */
 struct pf_state {
@@ -58,12 +77,12 @@ struct pf_state {
     u32 error_code;
 };
 
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_HASH);
-     .max_entries = MAX_VCPUS);
-     .key_size = sizeof(u32);
-     .value_size = sizeof(struct pf_state);
-}; pf_states SEC(".maps");
+struct bpf_map_def SEC("maps") pf_states = {
+    .type = BPF_MAP_TYPE_HASH,
+    .max_entries = MAX_VCPUS,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(struct pf_state),
+};
 
 /* Error code flags */
 #define PFERR_PRESENT_BIT 0
@@ -96,17 +115,17 @@ int trace_kvm_page_fault(struct trace_event_raw_kvm_page_fault *ctx)
         struct mm_stat new_stat = {};
         new_stat.page_fault_count = 1;
         bpf_map_update_elem(&mm_stats, &vcpu_id, &new_stat, BPF_ANY);
-    }; else {
+    } else {
         stat->page_fault_count++;
     }
     
     /* Store state for duration tracking */
-    struct pf_state state = {};
-    state.start_ts = now;
-    state.guest_pa = guest_pa;
-    state.guest_va = guest_va;
-    state.error_code = error_code;
-    bpf_map_update_elem(&pf_states, &vcpu_id, &state, BPF_ANY);
+    struct pf_state new_state = {};
+    new_state.start_ts = now;
+    new_state.guest_pa = guest_pa;
+    new_state.guest_va = guest_va;
+    new_state.error_code = error_code;
+    bpf_map_update_elem(&pf_states, &vcpu_id, &new_state, BPF_ANY);
     
     /* Send event */
     struct mm_event *event = bpf_ringbuf_reserve(&mm_events, sizeof(*event), 0);
@@ -138,7 +157,7 @@ SEC("kprobe/kvm_x86_ops->handle_ept_violation")
 int BPF_KPROBE(trace_ept_violation_entry, struct kvm_vcpu *vcpu, 
                gpa_t gpa, u64 error_code)
 {
-    u32 vcpu_id = BPF_CORE_READ(vcpu, vcpu_id);
+    u32 vcpu_id = vcpu->vcpu_id;
     u64 now = bpf_ktime_get_ns();
     
     struct mm_stat *stat = bpf_map_lookup_elem(&mm_stats, &vcpu_id);
@@ -160,7 +179,7 @@ SEC("kprobe/tdp_page_fault")
 int BPF_KPROBE(trace_tdp_page_fault, struct kvm_vcpu *vcpu, 
                struct kvm_page_fault *fault)
 {
-    u32 vcpu_id = BPF_CORE_READ(vcpu, vcpu_id);
+    u32 vcpu_id = vcpu->vcpu_id;
     u64 now = bpf_ktime_get_ns();
     
     struct pf_state *state = bpf_map_lookup_elem(&pf_states, &vcpu_id);
@@ -200,7 +219,7 @@ SEC("kprobe/kvm_arch_vcpu_load")
 int BPF_KPROBE(trace_vcpu_load, struct kvm_vcpu *vcpu, int cpu)
 {
     /* Track vCPU migration between physical CPUs (TLB implications) */
-    u32 vcpu_id = BPF_CORE_READ(vcpu, vcpu_id);
+    u32 vcpu_id = vcpu->vcpu_id;
     u32 new_cpu = cpu;
     
     /* Could track vCPU pinning/migration patterns */

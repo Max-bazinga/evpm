@@ -4,6 +4,17 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
+#include "bpf_helpers.h"
+
+/* minimal trace event stubs */
+struct trace_event_raw_kvm_exit {
+    __u32 vcpu_id;
+    __u32 exit_reason;
+};
+struct trace_event_raw_kvm_entry {
+    __u32 vcpu_id;
+};
+
 #define MAX_EXIT_REASONS 256
 #define MAX_VCPUS 256
 

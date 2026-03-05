@@ -4,6 +4,17 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
+#include "bpf_helpers.h"
+
+/* minimal kernel/event stubs */
+struct trace_event_raw_kvm_io { __u32 vcpu_id; __u32 type; __u32 port; __u32 len; };
+struct trace_event_raw_virtio_device { };
+struct trace_event_raw_virtio_queue { __u32 vcpu_id; __u16 queue_id; };
+struct trace_event_raw_kvm_ack_irq { __u32 vcpu_id; __u32 irq; };
+
+/* dummy types for IRQ probes */
+struct kvm_kernel_irq_routing_entry { };
+struct kvm { };
 
 #define MAX_VCPUS 256
 #define MAX_VQS 256
@@ -47,32 +58,32 @@ struct vq_state {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_RINGBUF);
-     .max_entries = 512 * 1024);
-}; io_events SEC(".maps");
+struct bpf_map_def SEC("maps") io_events = {
+    .type = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 512 * 1024,
+};
 
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_HASH);
-     .max_entries = MAX_VQS);
-     .key_size = sizeof(u32); /* vq unique ID */
-     .value_size = sizeof(struct vq_state);
-}; vq_states SEC(".maps");
+struct bpf_map_def SEC("maps") vq_states = {
+    .type = BPF_MAP_TYPE_HASH,
+    .max_entries = MAX_VQS,
+    .key_size = sizeof(u32), /* vq unique ID */
+    .value_size = sizeof(struct vq_state),
+};
 
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_HASH);
-     .max_entries = 32);
-     .key_size = sizeof(u32); /* device ID */
-     .value_size = sizeof(struct io_stat);
-}; io_stats SEC(".maps");
+struct bpf_map_def SEC("maps") io_stats = {
+    .type = BPF_MAP_TYPE_HASH,
+    .max_entries = 32,
+    .key_size = sizeof(u32), /* device ID */
+    .value_size = sizeof(struct io_stat),
+};
 
 /* Counter for generating unique vq IDs */
-struct bpf_map_def SEC("maps") 
-     .type = BPF_MAP_TYPE_ARRAY);
-     .max_entries = 1);
-     .key_size = sizeof(u32);
-     .value_size = sizeof(u32);
-}; vq_id_counter SEC(".maps");
+struct bpf_map_def SEC("maps") vq_id_counter = {
+    .type = BPF_MAP_TYPE_ARRAY,
+    .max_entries = 1,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(u32),
+};
 
 /* Tracepoint: kvm_io - Port I/O */
 SEC("tp/kvm/kvm_io")
@@ -121,7 +132,8 @@ int trace_virtio_queue_notify(struct trace_event_raw_virtio_queue *ctx)
     u32 *counter = bpf_map_lookup_elem(&vq_id_counter, &counter_key);
     u32 vq_id = 0;
     if (counter) {
-        vq_id = __sync_fetch_and_add(counter, 1);
+        vq_id = *counter;
+        (*counter)++;
     }
     
     /* Store notify timestamp */

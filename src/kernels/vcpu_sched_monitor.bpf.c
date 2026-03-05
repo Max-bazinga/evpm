@@ -4,7 +4,10 @@
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
  */
 
-#include <linux/bpf.h>
+#include "bpf_helpers.h"
+
+/* minimal kernel stubs */
+struct pt_regs { };
 
 #define TASK_COMM_LEN 16
 #define MAX_VCPUS 256
@@ -37,10 +40,25 @@ struct vcpu_state {
     u32 pid;
 };
 
-/* Maps - BCC style with BPF_TABLE macro */
-BPF_TABLE("ringbuf", u32, struct vcpu_sched_event, events, 256 * 1024);
-BPF_TABLE("hash", u32, struct vcpu_state, vcpu_states, MAX_VCPUS);
-BPF_TABLE("hash", u32, u64, sched_latencies, 1);
+/* Maps */
+struct bpf_map_def SEC("maps") events = {
+    .type = BPF_MAP_TYPE_RINGBUF,
+    .max_entries = 256 * 1024,
+};
+
+struct bpf_map_def SEC("maps") vcpu_states = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(struct vcpu_state),
+    .max_entries = MAX_VCPUS,
+};
+
+struct bpf_map_def SEC("maps") sched_latencies = {
+    .type = BPF_MAP_TYPE_HASH,
+    .key_size = sizeof(u32),
+    .value_size = sizeof(u64),
+    .max_entries = 1,
+};
 
 /* Tracepoint: kvm_vcpu_run_begin */
 // args: vcpu_id
@@ -49,12 +67,12 @@ int tracepoint__kvm__kvm_vcpu_run_begin(struct pt_regs *ctx, unsigned int vcpu_i
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
     /* Update vCPU state */
-    struct vcpu_state *state = vcpu_states.lookup_ptr(&vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
     if (!state) {
         struct vcpu_state new_state = {};
         new_state.last_run_ns = now;
         new_state.pid = pid;
-        vcpu_states.update(&vcpu_id, &new_state);
+        bpf_map_update_elem(&vcpu_states, &vcpu_id, &new_state, BPF_ANY);
     } else {
         state->last_run_ns = now;
         state->pid = pid;
@@ -83,7 +101,7 @@ int tracepoint__kvm__kvm_vcpu_run_end(struct pt_regs *ctx, unsigned int vcpu_id)
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = vcpu_states.lookup_ptr(&vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
     if (state && state->last_run_ns > 0) {
         u64 duration = now - state->last_run_ns;
         state->total_run_ns += duration;
@@ -111,7 +129,7 @@ int tracepoint__kvm__kvm_vcpu_halt(struct pt_regs *ctx, unsigned int vcpu_id) {
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = vcpu_states.lookup_ptr(&vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
     if (state) {
         state->last_halt_ns = now;
     }
@@ -137,7 +155,7 @@ int tracepoint__kvm__kvm_vcpu_wakeup(struct pt_regs *ctx, unsigned int vcpu_id) 
     u64 now = bpf_ktime_get_ns();
     u32 pid = bpf_get_current_pid_tgid() >> 32;
     
-    struct vcpu_state *state = vcpu_states.lookup_ptr(&vcpu_id);
+    struct vcpu_state *state = bpf_map_lookup_elem(&vcpu_states, &vcpu_id);
     if (state && state->last_halt_ns > 0) {
         u64 halt_duration = now - state->last_halt_ns;
         state->total_halt_ns += halt_duration;
@@ -158,5 +176,5 @@ int tracepoint__kvm__kvm_vcpu_wakeup(struct pt_regs *ctx, unsigned int vcpu_id) 
     return 0;
 }
 
-char LICENSE[] = "GPL";
+char LICENSE[] SEC("license") = "GPL";
 
