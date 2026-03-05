@@ -89,13 +89,21 @@ class BPFLoader:
                 '-I/usr/include/aarch64-linux-gnu',  # ARM64
                 '-I/usr/include/i386-linux-gnu',     # x86
             ]
-            bpf = BPF(text=src, cflags=cflags)
+            # BCC 自动附加 tracepoints 和 kprobes（不需要手动遍历）
+            bpf = BPF(text=src, cflags=cflags, debug=0)
             self.programs[name] = bpf
             
-            # Auto-attach tracepoints and kprobes
-            self._auto_attach(bpf, name)
-            
             print(f"  ✓ Loaded: {name}")
+            
+            # 检查已附加的探针
+            attached = []
+            if hasattr(bpf, 'tracepoints') and bpf.tracepoints:
+                attached.append(f"tracepoints:{len(bpf.tracepoints)}")
+            if hasattr(bpf, 'kprobes') and bpf.kprobes:
+                attached.append(f"kprobes:{len(bpf.kprobes)}")
+            if attached:
+                print(f"    Attached: {', '.join(attached)}")
+            
             return bpf
             
         except Exception as e:
