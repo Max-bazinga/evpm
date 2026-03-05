@@ -66,29 +66,31 @@ class EventCollector:
         if not bpf:
             return
         
-        # Get ring buffer (default name: events)
-        ring_buf = None
-        for map_name, map_obj in bpf.get_tables().items():
-            if hasattr(map_obj, 'open_ring_buffer'):
-                ring_buf = map_obj
-                break
+        # Get ring buffer by name 'events'
+        try:
+            ring_buf = bpf['events']
+        except KeyError:
+            print(f"  Warning: No 'events' ring buffer in {program_name}")
+            return
         
-        if not ring_buf:
-            print(f"  Warning: No ring buffer found in {program_name}")
+        if not hasattr(ring_buf, 'open_ring_buffer'):
+            print(f"  Warning: 'events' not a ring buffer in {program_name}")
             return
         
         def callback(ctx, data, size):
-            event = bpf.bpf_get_table('events').event(data)
-            self.event_queue.put((program_name, event))
-        
-        ring_buf.open_ring_buffer(callback)
-        
-        while self.running:
             try:
-                ring_buf.poll(timeout=100)
+                event = ring_buf.event(data)
+                self.event_queue.put((program_name, event))
             except Exception as e:
-                print(f"  Ring buffer error in {program_name}: {e}")
-                time.sleep(1)
+                print(f"  Callback error: {e}")
+        
+        try:
+            ring_buf.open_ring_buffer(callback)
+            while self.running:
+                ring_buf.poll(timeout=100)
+        except Exception as e:
+            if self.running:
+                print(f"  Ring buffer error: {e}")
     
     def _process_events(self):
         """Process events from queue"""
