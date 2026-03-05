@@ -4,7 +4,7 @@
  * Monitors EPT/NPT page faults, TLB misses, and memory access patterns
  */
 
-#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 /* minimal kernel type stubs to satisfy compilation without full vmlinux.h */

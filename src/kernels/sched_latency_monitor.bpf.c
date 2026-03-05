@@ -4,7 +4,7 @@
  * Monitors scheduling latency for vCPU threads
  */
 
-#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 
 /* forward declaration to satisfy prototypes without full definition */
