@@ -67,15 +67,29 @@ struct {
     __type(value, u32);
 } vq_id_counter SEC("maps");
 
-/* Tracepoint: kvm_io - Port I/O */
+/* Tracepoint: kvm_io - Port I/O
+ * Use probe_read to handle missing BTF definitions
+ */
 SEC("tp/kvm/kvm_io")
-int trace_kvm_io(struct trace_event_raw_kvm_io *ctx)
+int trace_kvm_io(void *ctx)
 {
-    u32 vcpu_id = ctx->vcpu_id;
+    /* 
+     * trace_event_raw_kvm_io layout (may vary by kernel version):
+     * struct trace_entry ent;  // 8 bytes
+     * unsigned int vcpu_id;    // offset 8, size 4
+     * u32 type;                // offset 12, size 4
+     * u32 port;                // offset 16, size 4
+     * u32 len;                 // offset 20, size 4
+     */
+    u32 vcpu_id = 0, type = 0, port = 0, len = 0;
+    
+    /* Use bpf_probe_read_kernel to safely access fields */
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&type, sizeof(type), ctx + 12);
+    bpf_probe_read_kernel(&port, sizeof(port), ctx + 16);
+    bpf_probe_read_kernel(&len, sizeof(len), ctx + 20);
+    
     u64 now = bpf_ktime_get_ns();
-    u32 type = ctx->type; /* 0 = read, 1 = write */
-    u32 port = ctx->port;
-    u32 len = ctx->len;
     
     struct io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
@@ -96,17 +110,22 @@ int trace_kvm_io(struct trace_event_raw_kvm_io *ctx)
 
 /* Tracepoint: virtio_device_ready */
 SEC("tp/virtio/virtio_device_ready")
-int trace_virtio_device_ready(struct trace_event_raw_virtio_device *ctx)
+int trace_virtio_device_ready(void *ctx)
 {
     /* Track device initialization */
     return 0;
 }
 
-/* Tracepoint: virtio_queue_notify */
+/* Tracepoint: virtio_queue_notify
+ * Layout: trace_entry (8) + vcpu_id (4) + queue_id (4) + ...
+ */
 SEC("tp/virtio/virtio_queue_notify")
-int trace_virtio_queue_notify(struct trace_event_raw_virtio_queue *ctx)
+int trace_virtio_queue_notify(void *ctx)
 {
-    u32 vcpu_id = ctx->vcpu_id;
+    u32 vcpu_id = 0, queue_id = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&queue_id, sizeof(queue_id), ctx + 12);
+    
     u64 now = bpf_ktime_get_ns();
     
     /* Generate unique vq ID */
@@ -121,8 +140,8 @@ int trace_virtio_queue_notify(struct trace_event_raw_virtio_queue *ctx)
     /* Store notify timestamp */
     struct vq_state state = {};
     state.notify_ts = now;
-    state.device_id = 0; /* Could extract from context */
-    state.vq_index = ctx->queue_id;
+    state.device_id = 0;
+    state.vq_index = queue_id;
     bpf_map_update_elem(&vq_states, &vq_id, &state, BPF_ANY);
     
     /* Update stats */
@@ -139,7 +158,7 @@ int trace_virtio_queue_notify(struct trace_event_raw_virtio_queue *ctx)
         event->timestamp = now;
         event->event_type = IO_VIRTIO_NOTIFY;
         event->device_id = state.device_id;
-        event->vq_id = ctx->queue_id;
+        event->vq_id = queue_id;  /* Use already read value */
         event->duration_ns = 0;
         event->data_len = 0;
         bpf_ringbuf_submit(event, 0);
@@ -181,13 +200,17 @@ int BPF_KPROBE(trace_ioapic_set_irq, void *ioapic, int irq, int level)
     return 0;
 }
 
-/* Tracepoint: kvm_ack_irq - IRQ acknowledgment */
+/* Tracepoint: kvm_ack_irq - IRQ acknowledgment
+ * Layout: trace_entry (8) + vcpu_id (4) + irq (4) + ...
+ */
 SEC("tp/kvm/kvm_ack_irq")
-int trace_kvm_ack_irq(struct trace_event_raw_kvm_ack_irq *ctx)
+int trace_kvm_ack_irq(void *ctx)
 {
-    u32 vcpu_id = ctx->vcpu_id;
+    u32 vcpu_id = 0, irq = 0;
+    bpf_probe_read_kernel(&vcpu_id, sizeof(vcpu_id), ctx + 8);
+    bpf_probe_read_kernel(&irq, sizeof(irq), ctx + 12);
+    
     u64 now = bpf_ktime_get_ns();
-    u32 irq = ctx->irq;
     
     struct io_event *event = bpf_ringbuf_reserve(
         &io_events, sizeof(*event), 0);
