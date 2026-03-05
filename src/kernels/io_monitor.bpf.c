@@ -210,7 +210,7 @@ int trace_kvm_ack_irq(void *ctx)
 
 /* Kprobe: ioeventfd_write - IO eventfd write (fast path notification) */
 SEC("kprobe/ioeventfd_write")
-int BPF_KPROBE(trace_ioeventfd_write, void *fd, struct kvm_vcpu *vcpu)
+int trace_ioeventfd_write(void *ctx)
 {
     /* Track ioeventfd-based notifications (fast I/O path) */
     return 0;
