@@ -4,7 +4,8 @@
  * Monitors EPT/NPT page faults, TLB misses, and memory access patterns
  */
 
-#include "bpf_helpers.h"
+#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include <bpf/bpf_helpers.h>
 
 /* minimal kernel type stubs to satisfy compilation without full vmlinux.h */
 typedef __u64 gpa_t;
@@ -57,17 +58,17 @@ struct mm_stat {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") mm_events = {
-    .type = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 512 * 1024,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 512 * 1024);
+} mm_events SEC("maps");
 
-struct bpf_map_def SEC("maps") mm_stats = {
-    .type = BPF_MAP_TYPE_HASH,
-    .max_entries = MAX_VCPUS,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(struct mm_stat),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_VCPUS);
+    __type(key, u32);
+    __type(value, struct mm_stat);
+} mm_stats SEC("maps");
 
 /* Page fault handling state */
 struct pf_state {
@@ -77,12 +78,12 @@ struct pf_state {
     u32 error_code;
 };
 
-struct bpf_map_def SEC("maps") pf_states = {
-    .type = BPF_MAP_TYPE_HASH,
-    .max_entries = MAX_VCPUS,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(struct pf_state),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_VCPUS);
+    __type(key, u32);
+    __type(value, struct pf_state);
+} pf_states SEC("maps");
 
 /* Error code flags */
 #define PFERR_PRESENT_BIT 0

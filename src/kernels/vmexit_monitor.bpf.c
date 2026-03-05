@@ -4,7 +4,8 @@
  * Monitors VM Exit events: count, reasons, duration
  */
 
-#include "bpf_helpers.h"
+#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include <bpf/bpf_helpers.h>
 
 /* minimal trace event stubs */
 struct trace_event_raw_kvm_exit {
@@ -45,31 +46,31 @@ struct vmexit_stat {
 };
 
 /* Maps - BCC style */
-struct bpf_map_def SEC("maps") vmexit_events = {
-    .type = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 512 * 1024,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 512 * 1024);
+} vmexit_events SEC("maps");
 
-struct bpf_map_def SEC("maps") vmexit_states = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(struct vmexit_state),
-    .max_entries = MAX_VCPUS,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_VCPUS);
+    __type(key, u32);
+    __type(value, struct vmexit_state);
+} vmexit_states SEC("maps");
 
-struct bpf_map_def SEC("maps") vmexit_stats = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(struct vmexit_stat),
-    .max_entries = MAX_EXIT_REASONS,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_EXIT_REASONS);
+    __type(key, u32);
+    __type(value, struct vmexit_stat);
+} vmexit_stats SEC("maps");
 
-struct bpf_map_def SEC("maps") duration_hist = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(u64),
-    .max_entries = 20,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 20);
+    __type(key, u32);
+    __type(value, u64);
+} duration_hist SEC("maps");
 
 /* Pre-defined duration buckets (in microseconds) */
 static const u64 DURATION_BUCKETS[] = {

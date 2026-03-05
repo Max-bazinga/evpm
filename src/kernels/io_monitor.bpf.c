@@ -4,17 +4,11 @@
  * Monitors Virtio, MMIO, PIO, and interrupt handling
  */
 
-#include "bpf_helpers.h"
-
-/* minimal kernel/event stubs */
-struct trace_event_raw_kvm_io { __u32 vcpu_id; __u32 type; __u32 port; __u32 len; };
-struct trace_event_raw_virtio_device { };
-struct trace_event_raw_virtio_queue { __u32 vcpu_id; __u16 queue_id; };
-struct trace_event_raw_kvm_ack_irq { __u32 vcpu_id; __u32 irq; };
+#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include <bpf/bpf_helpers.h>
 
 /* dummy types for IRQ probes */
 struct kvm_kernel_irq_routing_entry { };
-struct kvm { };
 
 #define MAX_VCPUS 256
 #define MAX_VQS 256
@@ -28,18 +22,6 @@ enum io_event_type {
     IO_PIO_WRITE,
     IO_IRQ_INJECT,
     IO_IRQ_ACK,
-};
-
-/* I/O event */
-struct io_event {
-    u32 pid;
-    u32 vcpu_id;
-    u64 timestamp;
-    u32 event_type;
-    u32 device_id;
-    u32 vq_id;
-    u64 duration_ns;
-    u32 data_len;
 };
 
 /* Per-device I/O statistics */
@@ -58,32 +40,32 @@ struct vq_state {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") io_events = {
-    .type = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 512 * 1024,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 512 * 1024);
+} io_events SEC("maps");
 
-struct bpf_map_def SEC("maps") vq_states = {
-    .type = BPF_MAP_TYPE_HASH,
-    .max_entries = MAX_VQS,
-    .key_size = sizeof(u32), /* vq unique ID */
-    .value_size = sizeof(struct vq_state),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_VQS);
+    __type(key, u32);
+    __type(value, struct vq_state);
+} vq_states SEC("maps");
 
-struct bpf_map_def SEC("maps") io_stats = {
-    .type = BPF_MAP_TYPE_HASH,
-    .max_entries = 32,
-    .key_size = sizeof(u32), /* device ID */
-    .value_size = sizeof(struct io_stat),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 32);
+    __type(key, u32);
+    __type(value, struct io_stat);
+} io_stats SEC("maps");
 
 /* Counter for generating unique vq IDs */
-struct bpf_map_def SEC("maps") vq_id_counter = {
-    .type = BPF_MAP_TYPE_ARRAY,
-    .max_entries = 1,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(u32),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u32);
+} vq_id_counter SEC("maps");
 
 /* Tracepoint: kvm_io - Port I/O */
 SEC("tp/kvm/kvm_io")

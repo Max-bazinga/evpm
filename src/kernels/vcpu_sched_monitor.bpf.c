@@ -4,7 +4,8 @@
  * Monitors vCPU lifecycle: run, halt, wakeup, schedule latency
  */
 
-#include "bpf_helpers.h"
+#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include <bpf/bpf_helpers.h>
 
 /* minimal kernel stubs */
 struct pt_regs { };
@@ -41,24 +42,24 @@ struct vcpu_state {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") events = {
-    .type = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 256 * 1024,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 256 * 1024);
+} events SEC("maps");
 
-struct bpf_map_def SEC("maps") vcpu_states = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(struct vcpu_state),
-    .max_entries = MAX_VCPUS,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_VCPUS);
+    __type(key, u32);
+    __type(value, struct vcpu_state);
+} vcpu_states SEC("maps");
 
-struct bpf_map_def SEC("maps") sched_latencies = {
-    .type = BPF_MAP_TYPE_HASH,
-    .key_size = sizeof(u32),
-    .value_size = sizeof(u64),
-    .max_entries = 1,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, u64);
+} sched_latencies SEC("maps");
 
 /* Tracepoint: kvm_vcpu_run_begin */
 // args: vcpu_id

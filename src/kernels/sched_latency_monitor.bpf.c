@@ -4,7 +4,8 @@
  * Monitors scheduling latency for vCPU threads
  */
 
-#include "bpf_helpers.h"
+#include <x86_64-linux-gnu/linux/bpf/vmlinux.h>
+#include <bpf/bpf_helpers.h>
 
 /* forward declaration to satisfy prototypes without full definition */
 struct task_struct;
@@ -32,33 +33,33 @@ struct sched_state {
 };
 
 /* Maps */
-struct bpf_map_def SEC("maps") sched_events = {
-    .type = BPF_MAP_TYPE_RINGBUF,
-    .max_entries = 256 * 1024,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 256 * 1024);
+} sched_events SEC("maps");
 
-struct bpf_map_def SEC("maps") sched_states = {
-    .type = BPF_MAP_TYPE_HASH,
-    .max_entries = MAX_PIDS,
-    .key_size = sizeof(__u32),
-    .value_size = sizeof(struct sched_state),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(max_entries, MAX_PIDS);
+    __type(key, __u32);
+    __type(value, struct sched_state);
+} sched_states SEC("maps");
 
 /* Latency histogram (in microseconds) */
-struct bpf_map_def SEC("maps") latency_hist = {
-    .type = BPF_MAP_TYPE_ARRAY,
-    .max_entries = LATENCY_BUCKETS,
-    .key_size = sizeof(__u32),
-    .value_size = sizeof(__u64),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, LATENCY_BUCKETS);
+    __type(key, __u32);
+    __type(value, __u64);
+} latency_hist SEC("maps");
 
 /* Configuration: threshold for high latency events (default: 10ms) */
-struct bpf_map_def SEC("maps") latency_threshold = {
-    .type = BPF_MAP_TYPE_ARRAY,
-    .max_entries = 1,
-    .key_size = sizeof(__u32),
-    .value_size = sizeof(__u64),
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, __u32);
+    __type(value, __u64);
+} latency_threshold SEC("maps");
 
 /* Helper: Check if task is QEMU/KVM process */
 static __always_inline bool is_qemu_task(struct task_struct *task)

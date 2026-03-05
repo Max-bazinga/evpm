@@ -43,16 +43,51 @@ typedef __u64 u64;
 #define BPF_ANY 0
 #endif
 
-/* minimal map definition used by BCC-style maps */
-struct bpf_map_def {
-    u32 type;
-    u32 key_size;
-    u32 value_size;
-    u32 max_entries;
-    u32 map_flags;
+
+/* Stub for trace_event_raw_kvm_io */
+struct trace_event_raw_kvm_io {
+    u32 vcpu_id;
+    u32 type; /* 0 = read, 1 = write */
+    u32 port;
+    u32 len;
+    u64 val;
 };
 
-/* prototypes for commonly used BPF helper functions with stub bodies */
+/* Stub for trace_event_raw_kvm_mmio */
+struct trace_event_raw_kvm_mmio {
+    u32 vcpu_id;
+    u32 type; /* 0 = read, 1 = write */
+    u64 phys_addr;
+    u32 len;
+    u64 val;
+};
+
+/* Stub for trace_event_raw_kvm_vmexit */
+struct trace_event_raw_kvm_vmexit {
+    u32 vcpu_id;
+    u32 exit_reason;
+    u64 rip;
+    u64 guest_rip;
+    u32 isa;
+    u32 info1;
+    u32 info2;
+    u32 intr_info;
+    u32 error_code;
+    u32 vector;
+    u32 flags;
+    u64 pad;
+};
+
+/* Stub for trace_event_raw_sched_switch */
+struct trace_event_raw_sched_switch {
+    char prev_comm[16];
+    u32 prev_pid;
+    u32 prev_prio;
+    u64 prev_state;
+    char next_comm[16];
+    u32 next_pid;
+    u32 next_prio;
+};
 static __inline void *bpf_map_lookup_elem(void *map, const void *key) { return (void *)0; }
 static __inline int bpf_map_update_elem(void *map, const void *key,
                                        const void *value, u64 flags) { return 0; }
