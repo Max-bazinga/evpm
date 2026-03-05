@@ -106,25 +106,36 @@ class BPFLoader:
         """Automatically attach tracepoints and kprobes"""
         attached = []
         
-        # Attach tracepoints (using attach_tracepoint for SEC-defined probes)
-        for tp_name, tp_fn in bpf.tracepoints.items():
-            try:
-                # tp_name is like "kvm:kvm_vcpu_run_begin"
-                parts = tp_name.split(':')
-                if len(parts) == 2:
-                    category, event = parts
-                    bpf.attach_tracepoint(event=f"{category}:{event}", fn_name=tp_fn.name)
-                    attached.append(f"tp:{tp_name}")
-            except Exception as e:
-                print(f"    Warning: Failed to attach tracepoint {tp_name}: {e}")
+        # Get tracepoints using BCC API
+        try:
+            # Try different BCC versions API
+            tracepoints = getattr(bpf, 'tracepoints', None) or bpf.get_tracepoints()
+            if tracepoints:
+                for tp_name, tp_fn in tracepoints.items() if isinstance(tracepoints, dict) else [(t, None) for t in tracepoints]:
+                    try:
+                        # tp_name is like "kvm:kvm_vcpu_run_begin"
+                        parts = tp_name.split(':')
+                        if len(parts) == 2:
+                            category, event = parts
+                            fn_name = tp_fn.name if tp_fn else f"trace_{event}"
+                            bpf.attach_tracepoint(event=f"{category}:{event}", fn_name=fn_name)
+                            attached.append(f"tp:{tp_name}")
+                    except Exception as e:
+                        print(f"    Warning: Failed to attach tracepoint {tp_name}: {e}")
+        except Exception as e:
+            print(f"    Info: No tracepoints found or attach failed: {e}")
         
-        # Also check for kprobes
-        for kprobe_name, kprobe_fn in bpf.kprobes.items():
-            try:
-                bpf.attach_kprobe(event=kprobe_name, fn_name=kprobe_fn.name)
-                attached.append(f"kp:{kprobe_name}")
-            except Exception as e:
-                print(f"    Warning: Failed to attach kprobe {kprobe_name}: {e}")
+        # Get kprobes
+        try:
+            kprobes = getattr(bpf, 'kprobes', None) or []
+            for kprobe_name in kprobes if isinstance(kprobes, list) else kprobes.keys() if isinstance(kprobes, dict) else []:
+                try:
+                    bpf.attach_kprobe(event=kprobe_name, fn_name=kprobe_name)
+                    attached.append(f"kp:{kprobe_name}")
+                except Exception as e:
+                    print(f"    Warning: Failed to attach kprobe {kprobe_name}: {e}")
+        except Exception as e:
+            print(f"    Info: No kprobes found or attach failed: {e}")
         
         if attached:
             print(f"    Attached: {', '.join(attached)}")
