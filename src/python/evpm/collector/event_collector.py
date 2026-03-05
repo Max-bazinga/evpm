@@ -62,9 +62,14 @@ class EventCollector:
     
     def _consume_ring_buffer(self, program_name: str):
         """Consume events from a BPF Hash table (poll-based for BCC 0.26.0 compatibility)"""
+        print(f"  DEBUG: Starting consumer thread for {program_name}")
+        
         bpf = self.bpf_loader.get_program(program_name)
         if not bpf:
+            print(f"  DEBUG: No BPF program for {program_name}")
             return
+        
+        print(f"  DEBUG: Got BPF program for {program_name}")
         
         # Get events hash table
         try:
